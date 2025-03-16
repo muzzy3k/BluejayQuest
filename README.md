@@ -4,10 +4,10 @@
 
 - install node.js
 - clone repo
-- in terminal run ''' npm install '''
+- in terminal run `npm install`
 - get mapbox access token from https://account.mapbox.com/auth/signup/
-- create config.js file in src folder with code ''' export const MAPBOX_ACCESS_TOKEN = 'your_token_from_account'; '''
-- run ''' npx vite ''' to run locally
+- create config.js file in src folder with code `export const MAPBOX_ACCESS_TOKEN = 'your_token_from_account';`
+- run `npx vite` to run locally
 
 ## Accredation
 
