@@ -1,0 +1,21 @@
+{
+  "name": "bluejay-quest",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "vite": "^6.2.0"
+  },
+  "dependencies": {
+    "@turf/turf": "^7.2.0",
+    "mapbox-gl": "^3.10.0",
+    "three": "^0.174.0",
+    "three-stdlib": "^2.35.14",
+    "threebox-plugin": "^2.2.7"
+  }
+}
