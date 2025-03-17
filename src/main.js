@@ -48,9 +48,6 @@ const layerList = document.createElement('div');
 layerList.className = 'map-style-list';
 const styleOptions = [
   { id: 'streets-v12', title: 'Streets' },
-  { id: 'light-v11', title: 'Light' },
-  { id: 'dark-v11', title: 'Dark' },
-  { id: 'satellite-v9', title: 'Satellite' },
   { id: 'satellite-streets-v12', title: 'Satellite Streets' }
 ];
 styleOptions.forEach(style => {
@@ -61,6 +58,11 @@ styleOptions.forEach(style => {
   link.onclick = (e) => {
     e.preventDefault();
     map.setStyle('mapbox://styles/mapbox/' + style.id);
+    
+    // Listen for the style to finish loading, then re-add 3D features
+    map.once('style.load', () => {
+      setupTerrainAndBuildings();
+    });
   };
   layerList.appendChild(link);
 });
@@ -581,66 +583,77 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
+function setupTerrainAndBuildings() {
+  console.log('Setting up terrain and buildings');
+
+  // Add 3D terrain if it doesn't exist
+  if (!map.getSource('mapbox-dem')) {
+    map.addSource('mapbox-dem', {
+      type: 'raster-dem',
+      url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
+      tileSize: 512,
+      maxzoom: 16
+    });
+    map.setTerrain({ source: 'mapbox-dem', exaggeration: 1.5 });
+  }
+
+  // Add 3D buildings layer if it doesn't exist
+  if (!map.getLayer('3d-buildings')) {
+    map.addLayer({
+      id: '3d-buildings',
+      source: 'composite',
+      'source-layer': 'building',
+      type: 'fill-extrusion',
+      minzoom: 15,
+      paint: {
+        'fill-extrusion-color': [
+          'match',
+          ['get', 'type'],
+          'education', '#FF8C00',
+          'commercial', '#4682B4',
+          'residential', '#CD5C5C',
+          '#BEBEBE'
+        ],
+        'fill-extrusion-height': [
+          'interpolate', ['linear'], ['zoom'],
+          15, 0,
+          15.05, ['*', ['get', 'height'], 1.2]
+        ],
+        'fill-extrusion-base': [
+          'interpolate', ['linear'], ['zoom'],
+          15, 0,
+          15.05, ['get', 'min_height']
+        ],
+        'fill-extrusion-opacity': 0.8
+      }
+    });
+  }
+
+    // Add a campus boundary polygon (if desired)
+    if (!map.getSource('campus-boundary')) {
+      map.addSource('campus-boundary', {
+        type: 'geojson',
+        data: {
+          type: 'Feature',
+          geometry: {
+            type: 'Polygon',
+            coordinates: [[
+              [-76.596720, 40.149641],
+              [-76.589503, 40.153440],
+              [-76.581853, 40.150569],
+              [-76.591676, 40.143198],
+              [-76.596720, 40.149641]
+            ]]
+          }
+        }
+      });
+    }
+}
+  
 // -----------------------------
 // Add 3D Terrain & Buildings when Map Loads
 // -----------------------------
 map.on('load', () => {
   console.log('Map loaded');
-
-  // Add 3D terrain
-  map.addSource('mapbox-dem', {
-    type: 'raster-dem',
-    url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
-    tileSize: 512,
-    maxzoom: 14
-  });
-  map.setTerrain({ source: 'mapbox-dem', exaggeration: 1.5 });
-
-  // Add 3D buildings layer from Mapbox with enhanced height
-  map.addLayer({
-    id: '3d-buildings',
-    source: 'composite',
-    'source-layer': 'building',
-    type: 'fill-extrusion',
-    minzoom: 15,
-    paint: {
-      'fill-extrusion-color': [
-        'match',
-        ['get', 'type'],
-        'education', '#FF8C00',
-        'commercial', '#4682B4',
-        'residential', '#CD5C5C',
-        '#BEBEBE'
-      ],
-      'fill-extrusion-height': [
-        'interpolate', ['linear'], ['zoom'],
-        15, 0,
-        15.05, ['*', ['get', 'height'], 1.2]
-      ],
-      'fill-extrusion-base': [
-        'interpolate', ['linear'], ['zoom'],
-        15, 0,
-        15.05, ['get', 'min_height']
-      ],
-      'fill-extrusion-opacity': 0.8
-    }
-  });
-
-  // Add a campus boundary polygon (if desired)
-  map.addSource('campus-boundary', {
-    type: 'geojson',
-    data: {
-      type: 'Feature',
-      geometry: {
-        type: 'Polygon',
-        coordinates: [[
-          [-76.596720, 40.149641],
-          [-76.589503, 40.153440],
-          [-76.581853, 40.150569],
-          [-76.591676, 40.143198],
-          [-76.596720, 40.149641]
-        ]]
-      }
-    }
-  });
+  setupTerrainAndBuildings();
 });
