@@ -1,12 +1,31 @@
 import * as THREE from 'three';
 import mapboxgl from 'mapbox-gl';
 import { MAPBOX_ACCESS_TOKEN } from './config.js';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js'; 
+import { AnimationMixer } from 'three';
 
 // Optionally disable telemetry to avoid POST errors
 if (mapboxgl.setTelemetryEnabled) {
   mapboxgl.setTelemetryEnabled(false);
 }
+
+const loadingScreen = document.createElement('div');
+loadingScreen.style.position = 'fixed';
+loadingScreen.style.top = '0';
+loadingScreen.style.left = '0';
+loadingScreen.style.width = '100%';
+loadingScreen.style.height = '100%';
+loadingScreen.style.backgroundColor = '#333';
+loadingScreen.style.display = 'flex';
+loadingScreen.style.justifyContent = 'center';
+loadingScreen.style.alignItems = 'center';
+loadingScreen.style.zIndex = '9999';
+loadingScreen.innerHTML = '<h1 style="color: white; font-family: sans-serif;">Loading 3D Models...</h1>';
+document.body.appendChild(loadingScreen);
+
+// Keep track of loaded models
+let modelsLoaded = 0;
+const totalModelsToLoad = 2;
 
 // -----------------------------
 // Mapbox initialization
@@ -85,8 +104,15 @@ const cameraSettings = {
 // -----------------------------
 // Bird Model Integration
 // -----------------------------
-const gltfLoader = new GLTFLoader();
-let bird = null;
+const fbxLoader = new FBXLoader();
+let stillBird = null;
+let walkingBird = null;
+let currentBird = null; // Reference to the currently active bird model
+let walkingMixer = null; // Walking animation mixer
+let stillMixer = null; // Standing animation mixer
+let walkingAction = null; // Walking animation action
+let standingAction = null; // Standing animation action
+
 // Our movement state now uses a speed for translation and a rotationSpeed for map rotation.
 const movementState = {
   bird: {
@@ -95,71 +121,321 @@ const movementState = {
     left: false,   // will rotate the map (and thus the camera) slowly
     right: false,
     speed: 0.1,
-    rotationSpeed: 0.05 // in radians per frame; will be halved for smoother map rotation
+    rotationSpeed: 0.05, // in radians per frame; will be halved for smoother map rotation
+    isMoving: false // New flag to track if the bird is currently in motion
   }
 };
 
+// Clock for animation timing
+const clock = new THREE.Clock();
+
 let birdForwardDirection = new THREE.Vector3(0, 0, 1); // Initial forward direction (beak direction)
 
-gltfLoader.load('/assets/scene.gltf', (gltf) => {
-  bird = gltf.scene;
-  bird.scale.set(3, 3, 3);
-  bird.position.set(0, 2, 0);
+// Load both models
+// First, load the still model
+fbxLoader.load('/assets/Standing.fbx', (fbx) => {
+  stillBird = fbx;
+  stillBird.scale.set(0.01, 0.01, 0.01); 
+  stillBird.position.set(0, 2, 0);
   
-  // Debug texture loading
-  console.log('Bird model structure:', gltf);
+  // Fix orientation
+  stillBird.rotation.x = Math.PI / 4;
+  stillBird.rotation.y = Math.PI;
   
-  // Apply a specific blue jay color since textures aren't loading
-  bird.traverse((child) => {
+  // Apply shadows and weight handling as before
+  stillBird.traverse((child) => {
     if (child.isMesh) {
       child.castShadow = true;
       child.receiveShadow = true;
       
-      if (child.material) {
-        // Apply blue jay colors directly instead of relying on textures
-        child.material.color = new THREE.Color(0x4169E1);    // Royal blue
-        child.material.emissive = new THREE.Color(0x111133); // Dark blue tint
-        child.material.needsUpdate = true;
-        
-        console.log('Applied blue color to mesh:', child.name);
+      // Skinning weight handling
+      if (child.geometry && child.geometry.attributes.skinWeight) {
+        const skinWeightAttribute = child.geometry.attributes.skinWeight;
+        for (let i = 0; i < skinWeightAttribute.count; i++) {
+          let sum = 0;
+          for (let j = 0; j < 4; j++) {
+            const idx = i * 4 + j;
+            if (idx < skinWeightAttribute.array.length) {
+              sum += skinWeightAttribute.array[idx];
+            }
+          }
+          if (sum > 0) {
+            for (let j = 0; j < 4; j++) {
+              const idx = i * 4 + j;
+              if (idx < skinWeightAttribute.array.length) {
+                skinWeightAttribute.array[idx] /= sum;
+              }
+            }
+          }
+        }
+        skinWeightAttribute.needsUpdate = true;
       }
+      
+      // Add optimization for animation
+      if (child.skeleton) {
+        child.frustumCulled = false;
+      }
+      child.matrixAutoUpdate = true;
+      child.matrixWorldNeedsUpdate = true;
     }
   });
   
-  // Add a spotlight to follow the bird
-  const spotlight = new THREE.SpotLight(0xffffff, 1.5);
-  spotlight.position.set(0, 20, 0);
-  spotlight.target = bird;
-  scene.add(spotlight);
+  // Set up standing animation
+  if (stillBird.animations && stillBird.animations.length > 0) {
+    console.log('Standing animations found:', stillBird.animations.length);
+    
+    stillMixer = new THREE.AnimationMixer(stillBird);
+    const standingClip = stillBird.animations[0];
+    
+    standingAction = stillMixer.clipAction(standingClip);
+    standingAction.setEffectiveWeight(1.0);
+    standingAction.setEffectiveTimeScale(0.8); // Slightly slower for idle animation
+    standingAction.play();
+    
+    console.log('Standing animation set up');
+  } else {
+    console.warn('No animations found in standing model');
+  }
   
-  scene.add(bird);
+  // Set initial bird model to standing
+  currentBird = stillBird;
+  scene.add(currentBird);
   updateCameraPosition();
   
-  console.log('Bird model loaded.');
-}, undefined, (error) => {
-  console.error('Error loading bird model:', error);
+  // Update loading tracker
+  modelsLoaded++;
+  if (modelsLoaded === totalModelsToLoad) {
+    document.body.removeChild(loadingScreen);
+  }
+  
+  console.log('Standing bird model loaded.');
+}, 
+(xhr) => {
+  const percentComplete = (xhr.loaded / xhr.total) * 100;
+  loadingScreen.innerHTML = `<h1 style="color: white; font-family: sans-serif;">Loading Standing Model: ${Math.round(percentComplete)}%</h1>`;
+}, 
+(error) => {
+  console.error('Error loading standing bird model:', error);
+  modelsLoaded++;
+  if (modelsLoaded === totalModelsToLoad) {
+    document.body.removeChild(loadingScreen);
+  }
 });
+
+let distanceTraveled = 0;
+let lastPosition = new THREE.Vector3();
+let cycleDistance = 0; //
+
+// Then, load the walking model
+fbxLoader.load('/assets/Walking.fbx', (fbx) => {
+  walkingBird = fbx;
+  walkingBird.scale.set(0.01, 0.01, 0.01);
+  walkingBird.position.set(0, 2, 0);
+  
+  // Fix orientation - tilt the bird backwards and rotate 180 degrees
+  walkingBird.rotation.x = Math.PI / 4; 
+  walkingBird.rotation.y = Math.PI;
+  
+  // Apply shadows and improved skinning weights handling
+  walkingBird.traverse((child) => {
+        if (child.isMesh) {
+      child.castShadow = true;
+      child.receiveShadow = true;
+      
+      // Improved skinning weight handling
+      if (child.geometry && child.geometry.attributes.skinWeight) {
+        const skinWeightAttribute = child.geometry.attributes.skinWeight;
+        for (let i = 0; i < skinWeightAttribute.count; i++) {
+          let sum = 0;
+          for (let j = 0; j < 4; j++) {
+            const idx = i * 4 + j;
+            if (idx < skinWeightAttribute.array.length) {
+              sum += skinWeightAttribute.array[idx];
+            }
+          }
+          if (sum > 0) {
+            for (let j = 0; j < 4; j++) {
+              const idx = i * 4 + j;
+              if (idx < skinWeightAttribute.array.length) {
+                skinWeightAttribute.array[idx] /= sum;
+              }
+            }
+          }
+        }
+        skinWeightAttribute.needsUpdate = true;
+      }
+      
+      // Fix specific issues with animation distortion
+      // Limit bone influence to prevent excessive deformation
+      if (child.skeleton) {
+        child.frustumCulled = false; // Prevents parts from disappearing
+      }
+      
+      // Set optimizations for animation rendering
+      child.matrixAutoUpdate = true;
+      child.matrixWorldNeedsUpdate = true;
+    }
+  });
+  
+  // Set up animation with improved settings
+  if (walkingBird.animations && walkingBird.animations.length > 0) {
+    console.log('Walking animations found:', walkingBird.animations.length);
+    
+    walkingMixer = new THREE.AnimationMixer(walkingBird);
+    const walkingClip = walkingBird.animations[0];
+    
+    // Fix animation loop behavior
+    walkingAction = walkingMixer.clipAction(walkingClip);
+    
+    // Ensure smooth looping with proper settings
+    walkingAction.setLoop(THREE.LoopRepeat);
+    walkingAction.clampWhenFinished = false; // Don't clamp at end frame
+    walkingAction.setEffectiveWeight(0.9);
+    walkingAction.setEffectiveTimeScale(1.0);
+    
+    // Enable seamless looping between end and start of animation
+    walkingAction.setDuration(walkingClip.duration);
+    walkingAction.fadeIn(0.5); // Smooth start
+    
+    // Critical: Add zero time for loop synchronization
+    walkingAction.zeroSlopeAtStart = true;
+    walkingAction.zeroSlopeAtEnd = true;
+    
+    walkingAction.play();
+    
+    console.log('Walking animation set up with smooth looping');
+  } else {
+    console.warn('No animations found in walking model');
+  }
+  
+  // Update loading tracker
+  modelsLoaded++;
+  if (modelsLoaded === totalModelsToLoad) {
+    document.body.removeChild(loadingScreen);
+  }
+  
+  console.log('Walking bird model loaded.');
+}, 
+// Add a loading progress handler
+(xhr) => {
+  const percentComplete = (xhr.loaded / xhr.total) * 100;
+  loadingScreen.innerHTML = `<h1 style="color: white; font-family: sans-serif;">Loading Walking Model: ${Math.round(percentComplete)}%</h1>`;
+}, 
+(error) => {
+  console.error('Error loading walking bird model:', error);
+  // Still remove loading screen in case of error
+  modelsLoaded++;
+  if (modelsLoaded === totalModelsToLoad) {
+    document.body.removeChild(loadingScreen);
+  }
+});
+
+// Function to switch between bird models
+function switchBirdModel(isMoving) {
+  // If already showing the correct model, do nothing
+  if ((isMoving && currentBird === walkingBird) || (!isMoving && currentBird === stillBird)) {
+    return;
+  }
+  
+  // Save current position and rotation
+  const currentPosition = currentBird ? currentBird.position.clone() : new THREE.Vector3(0, 2, 0);
+  const currentRotation = currentBird ? new THREE.Euler().copy(currentBird.rotation) : new THREE.Euler(Math.PI/4, Math.PI, 0);
+  
+  // Remove current bird from scene
+  if (currentBird) {
+    scene.remove(currentBird);
+  }
+  
+  // Set the appropriate model
+  if (isMoving && walkingBird) {
+    currentBird = walkingBird;
+    
+    // Make sure walking animation is playing with smooth transition
+    if (walkingMixer && walkingAction) {
+      if (!walkingAction.isRunning()) {
+        // Reset and restart animation when starting to move
+        walkingAction.reset();
+        walkingAction.play();
+      }
+      
+      // Ensure animation is synced with movement
+      if (walkingAction.time === walkingAction.getClip().duration) {
+        walkingAction.time = 0; // Restart if at the end
+      }
+    }
+  } else if (stillBird) {
+    currentBird = stillBird;
+    
+    // Make sure standing animation is playing
+    if (stillMixer && standingAction && !standingAction.isRunning()) {
+      standingAction.reset();
+      standingAction.play();
+    }
+  } else {
+    return; // If neither model is loaded yet, do nothing
+  }
+  
+  // Add the new current bird to the scene
+  scene.add(currentBird);
+  
+  // Apply saved position and rotation
+  currentBird.position.copy(currentPosition);
+  currentBird.rotation.copy(currentRotation);
+  
+  // But always maintain the fixed rotations
+  currentBird.rotation.x = Math.PI / 4;
+  const bearingRad = map.getBearing() * Math.PI / 180;
+  currentBird.rotation.y = bearingRad + Math.PI;
+}
 
 // Update the updateCameraPosition function to always call updateBirdDirection first
 function updateCameraPosition() {
-if (!bird) return;
+  if (!currentBird) return;
 
-updateBirdDirection(); // Always update bird direction first
+  updateBirdDirection(); // Always update bird direction first
 
-const bearingDeg = map.getBearing(); 
-const bearingRad = bearingDeg * Math.PI / 180;
+  const bearingDeg = map.getBearing(); 
+  const bearingRad = bearingDeg * Math.PI / 180;
 
-// "Behind" direction based on current map bearing
-const behindVector = new THREE.Vector3(Math.sin(bearingRad), 0, -Math.cos(bearingRad));
-behindVector.normalize();
+  // "Behind" direction based on current map bearing
+  const behindVector = new THREE.Vector3(Math.sin(bearingRad), 0, -Math.cos(bearingRad));
+  behindVector.normalize();
 
-// Position camera behind and slightly above at current distance
-const cameraOffset = behindVector.clone().multiplyScalar(cameraSettings.distance).add(new THREE.Vector3(0, 5, 0));
-const desiredCameraPos = bird.position.clone().sub(cameraOffset);
+  // Position camera behind and slightly above at current distance
+  const cameraOffset = behindVector.clone().multiplyScalar(cameraSettings.distance).add(new THREE.Vector3(0, 5, 0));
+  const desiredCameraPos = currentBird.position.clone().sub(cameraOffset);
 
-// Smooth camera movement
-camera.position.lerp(desiredCameraPos, 0.1);
-camera.lookAt(bird.position);
+  // Smooth camera movement
+  camera.position.lerp(desiredCameraPos, 0.1);
+  camera.lookAt(currentBird.position);
+}
+
+function syncWalkingAnimationWithMovement() {
+  if (!walkingAction || !walkingMixer) return;
+  
+  // If movement speed changes, adjust animation timeScale to match
+  const isMovingForward = movementState.bird.forward;
+  const isMovingBackward = movementState.bird.backward;
+  const isMoving = isMovingForward || isMovingBackward;
+  
+  if (isMoving) {
+    // Ensure animation doesn't get out of sync or jump
+    const clip = walkingAction.getClip();
+    if (walkingAction.time >= clip.duration - 0.1) {
+      // When near the end of animation, smoothly transition to start
+      // instead of jumping directly
+      walkingAction.time = 0;
+    }
+    
+    // Adjust animation speed based on movement direction
+    if (isMovingBackward) {
+      // Option 1: Play animation backward
+      walkingAction.setEffectiveTimeScale(-1.0);
+    } else {
+      // Play animation forward
+      walkingAction.setEffectiveTimeScale(1.0);
+    }
+  }
 }
 
 // -----------------------------
@@ -183,9 +459,13 @@ window.addEventListener('keydown', (event) => {
   switch (event.key) {
     case 'ArrowUp':
       movementState.bird.forward = true;
+      movementState.bird.isMoving = true;
+      switchBirdModel(true); // Switch to walking model
       break;
     case 'ArrowDown':
       movementState.bird.backward = true;
+      movementState.bird.isMoving = true;
+      switchBirdModel(true); // Switch to walking model
       break;
     case 'ArrowLeft':
       movementState.bird.left = true;
@@ -211,9 +491,15 @@ window.addEventListener('keyup', (event) => {
       movementState.bird.right = false;
       break;
   }
+  
+  // Check if bird has stopped moving completely
+  if (!movementState.bird.forward && !movementState.bird.backward) {
+    movementState.bird.isMoving = false;
+    switchBirdModel(false); // Switch to still model
+  }
 });
 
-// Replace your existing updateBirdDirection function with this:
+// Update the updateBirdDirection function
 function updateBirdDirection() {
   // Get the map bearing in radians
   const bearingRad = map.getBearing() * Math.PI / 180;
@@ -223,25 +509,37 @@ function updateBirdDirection() {
   birdForwardDirection.z = Math.cos(bearingRad);
   birdForwardDirection.normalize();
   
-  // Update bird rotation to face forward
-  if (bird && bird.rotation) {
-    // Always face forward relative to the camera view
-    // This makes the bird face the direction of the up arrow
-    bird.rotation.y = bearingRad;
+  // Update bird rotation to face forward, but maintain the 180 degree rotation
+  if (currentBird && currentBird.rotation) {
+    // Set Y rotation based on map bearing, but add PI (180 degrees) to face away
+    currentBird.rotation.y = bearingRad + Math.PI;
+    
+    // Maintain the fixed x-rotation (tilt)
+    currentBird.rotation.x = Math.PI / 4;
   }
 }
+
 
 // -----------------------------
 // Animation Loop: Update Bird, Map & Camera
 // -----------------------------
 function animate() {
   requestAnimationFrame(animate);
+  
+  // Update animation mixers
+  const delta = clock.getDelta();
+  if (walkingMixer) {
+    walkingMixer.update(delta);
+  }
+  if (stillMixer) {
+    stillMixer.update(delta);
+  }
 
-  if (bird) {
-    // Update bird direction (which now handles rotation)
+  if (currentBird) {
+    // Update bird direction
     updateBirdDirection();
     
-    // Handle rotation first
+    // Handle rotation
     if (movementState.bird.left) {
       map.setBearing(map.getBearing() - (movementState.bird.rotationSpeed * 180/Math.PI / 2));
     }
@@ -249,16 +547,19 @@ function animate() {
       map.setBearing(map.getBearing() + (movementState.bird.rotationSpeed * 180/Math.PI / 2));
     }
     
-    // Then handle movement using the updated direction
+    // Handle movement
     if (movementState.bird.forward) {
-      bird.position.addScaledVector(birdForwardDirection, movementState.bird.speed);
+      currentBird.position.addScaledVector(birdForwardDirection, movementState.bird.speed);
     }
     if (movementState.bird.backward) {
-      bird.position.addScaledVector(birdForwardDirection, -movementState.bird.speed);
+      currentBird.position.addScaledVector(birdForwardDirection, -movementState.bird.speed);
     }
     
+    // Keep walking animation synchronized with movement
+    syncWalkingAnimationWithMovement();
+    
     // Update map and camera
-    const birdPos = bird.position;
+    const birdPos = currentBird.position;
     map.setCenter([
       initialCenter.lng + (birdPos.x / 5000),
       initialCenter.lat + (birdPos.z / 5000)
