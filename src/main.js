@@ -27,6 +27,9 @@ document.body.appendChild(loadingScreen);
 let modelsLoaded = 0;
 const totalModelsToLoad = 2;
 
+// Add these variables at the top of your file
+let birdContainer = null; // Container to handle proper pivoting
+
 // -----------------------------
 // Mapbox initialization
 // -----------------------------
@@ -133,16 +136,31 @@ const clock = new THREE.Clock();
 
 let birdForwardDirection = new THREE.Vector3(0, 0, 1); // Initial forward direction (beak direction)
 
+// Add this variable to track the bird's rotation independently
+let birdYRotation = Math.PI; // Initialize to PI (180 degrees) to match initial orientation
+
 // Load both models
 // First, load the still model
 fbxLoader.load('/assets/Standing.fbx', (fbx) => {
   stillBird = fbx;
-  stillBird.scale.set(0.01, 0.01, 0.01); 
-  stillBird.position.set(0, 2, 0);
+  stillBird.scale.set(0.0095, 0.0095, 0.0095); 
   
-  // Fix orientation
-  stillBird.rotation.x = Math.PI / 4;
-  stillBird.rotation.y = Math.PI;
+  // Create a container for the still bird
+  const container = new THREE.Object3D();
+  container.position.set(0, 2, 0); // Position the container where the bird should be
+  
+  // Reset the bird position to be relative to the container
+  stillBird.position.set(0, 0, 0);
+  
+  // Fix orientation - only tilt, don't rotate Y
+  stillBird.rotation.x = -Math.PI / 16;
+  stillBird.rotation.y = 0;
+  
+  // Add the bird to the container
+  container.add(stillBird);
+  
+  // Store the container
+  birdContainer = container;
   
   // Apply shadows and weight handling as before
   stillBird.traverse((child) => {
@@ -201,7 +219,7 @@ fbxLoader.load('/assets/Standing.fbx', (fbx) => {
   
   // Set initial bird model to standing
   currentBird = stillBird;
-  scene.add(currentBird);
+  scene.add(birdContainer); // Add the container to the scene instead of the bird directly
   updateCameraPosition();
   
   // Update loading tracker
@@ -232,11 +250,13 @@ let cycleDistance = 0; //
 fbxLoader.load('/assets/Walking.fbx', (fbx) => {
   walkingBird = fbx;
   walkingBird.scale.set(0.01, 0.01, 0.01);
-  walkingBird.position.set(0, 2, 0);
   
-  // Fix orientation - tilt the bird backwards and rotate 180 degrees
-  walkingBird.rotation.x = Math.PI / 4; 
-  walkingBird.rotation.y = Math.PI;
+  // Reset the bird position to be relative to the container when used
+  walkingBird.position.set(0, 0, 0);
+  
+  // Fix orientation - only tilt, don't rotate Y
+  walkingBird.rotation.x = -Math.PI / 16; 
+  walkingBird.rotation.y = 0;
   
   // Apply shadows and improved skinning weights handling
   walkingBird.traverse((child) => {
@@ -297,7 +317,7 @@ fbxLoader.load('/assets/Walking.fbx', (fbx) => {
     
     // Enable seamless looping between end and start of animation
     walkingAction.setDuration(walkingClip.duration);
-    walkingAction.fadeIn(0.5); // Smooth start
+    walkingAction.fadeIn(0.2); // Smooth start
     
     // Critical: Add zero time for loop synchronization
     walkingAction.zeroSlopeAtStart = true;
@@ -339,64 +359,47 @@ function switchBirdModel(isMoving) {
     return;
   }
   
-  // Save current position and rotation
-  const currentPosition = currentBird ? currentBird.position.clone() : new THREE.Vector3(0, 2, 0);
-  const currentRotation = currentBird ? new THREE.Euler().copy(currentBird.rotation) : new THREE.Euler(Math.PI/4, Math.PI, 0);
-  
-  // Remove current bird from scene
-  if (currentBird) {
-    scene.remove(currentBird);
+  // Remove current bird from container
+  if (currentBird && birdContainer) {
+    birdContainer.remove(currentBird);
   }
   
   // Set the appropriate model
   if (isMoving && walkingBird) {
     currentBird = walkingBird;
     
-    // Make sure walking animation is playing with smooth transition
     if (walkingMixer && walkingAction) {
       if (!walkingAction.isRunning()) {
-        // Reset and restart animation when starting to move
         walkingAction.reset();
         walkingAction.play();
-      }
-      
-      // Ensure animation is synced with movement
-      if (walkingAction.time === walkingAction.getClip().duration) {
-        walkingAction.time = 0; // Restart if at the end
       }
     }
   } else if (stillBird) {
     currentBird = stillBird;
     
-    // Make sure standing animation is playing
     if (stillMixer && standingAction && !standingAction.isRunning()) {
       standingAction.reset();
       standingAction.play();
     }
   } else {
-    return; // If neither model is loaded yet, do nothing
+    return; // No models available
   }
   
-  // Add the new current bird to the scene
-  scene.add(currentBird);
+  // CRITICAL: Reset the bird model position and orientation
+  currentBird.position.set(0, 0, 0);
+  currentBird.rotation.set(-Math.PI/16, 0, 0); // Only tilt on X-axis, no Y rotation
   
-  // Apply saved position and rotation
-  currentBird.position.copy(currentPosition);
-  currentBird.rotation.copy(currentRotation);
-  
-  // But always maintain the fixed rotations
-  currentBird.rotation.x = Math.PI / 4;
-  const bearingRad = map.getBearing() * Math.PI / 180;
-  currentBird.rotation.y = bearingRad + Math.PI;
+  // Add to container
+  birdContainer.add(currentBird);
 }
 
 // Update the updateCameraPosition function to always call updateBirdDirection first
 function updateCameraPosition() {
-  if (!currentBird) return;
+  if (!birdContainer) return;
 
   updateBirdDirection(); // Always update bird direction first
 
-  const bearingDeg = map.getBearing(); 
+  const bearingDeg = map.getBearing();
   const bearingRad = bearingDeg * Math.PI / 180;
 
   // "Behind" direction based on current map bearing
@@ -405,36 +408,33 @@ function updateCameraPosition() {
 
   // Position camera behind and slightly above at current distance
   const cameraOffset = behindVector.clone().multiplyScalar(cameraSettings.distance).add(new THREE.Vector3(0, 5, 0));
-  const desiredCameraPos = currentBird.position.clone().sub(cameraOffset);
+  const desiredCameraPos = birdContainer.position.clone().sub(cameraOffset);
 
   // Smooth camera movement
   camera.position.lerp(desiredCameraPos, 0.1);
-  camera.lookAt(currentBird.position);
+  camera.lookAt(birdContainer.position);
 }
 
 function syncWalkingAnimationWithMovement() {
   if (!walkingAction || !walkingMixer) return;
   
-  // If movement speed changes, adjust animation timeScale to match
   const isMovingForward = movementState.bird.forward;
   const isMovingBackward = movementState.bird.backward;
   const isMoving = isMovingForward || isMovingBackward;
   
   if (isMoving) {
-    // Ensure animation doesn't get out of sync or jump
     const clip = walkingAction.getClip();
-    if (walkingAction.time >= clip.duration - 0.1) {
-      // When near the end of animation, smoothly transition to start
-      // instead of jumping directly
-      walkingAction.time = 0;
+    
+    // Instead of resetting, use modulo to wrap animation time
+    // This avoids the hard reset while keeping animation in bounds
+    if (walkingAction.time >= clip.duration) {
+      walkingAction.time = walkingAction.time % clip.duration;
     }
     
     // Adjust animation speed based on movement direction
     if (isMovingBackward) {
-      // Option 1: Play animation backward
       walkingAction.setEffectiveTimeScale(-1.0);
     } else {
-      // Play animation forward
       walkingAction.setEffectiveTimeScale(1.0);
     }
   }
@@ -503,22 +503,7 @@ window.addEventListener('keyup', (event) => {
 
 // Update the updateBirdDirection function
 function updateBirdDirection() {
-  // Get the map bearing in radians
-  const bearingRad = map.getBearing() * Math.PI / 180;
-  
-  // Update the forward direction vector
-  birdForwardDirection.x = Math.sin(bearingRad);
-  birdForwardDirection.z = Math.cos(bearingRad);
-  birdForwardDirection.normalize();
-  
-  // Update bird rotation to face forward, but maintain the 180 degree rotation
-  if (currentBird && currentBird.rotation) {
-    // Set Y rotation based on map bearing, but add PI (180 degrees) to face away
-    currentBird.rotation.y = bearingRad + Math.PI;
-    
-    // Maintain the fixed x-rotation (tilt)
-    currentBird.rotation.x = Math.PI / 4;
-  }
+  // This function can be left empty now as the animation loop handles rotation
 }
 
 
@@ -530,44 +515,57 @@ function animate() {
   
   // Update animation mixers
   const delta = clock.getDelta();
-  if (walkingMixer) {
-    walkingMixer.update(delta);
-  }
-  if (stillMixer) {
-    stillMixer.update(delta);
-  }
+  if (walkingMixer) walkingMixer.update(delta);
+  if (stillMixer) stillMixer.update(delta);
 
-  if (currentBird) {
-    // Update bird direction
-    updateBirdDirection();
-    
-    // Handle rotation
+  if (birdContainer) {
+    // Step 1: Handle map rotation first
     if (movementState.bird.left) {
-      map.setBearing(map.getBearing() - (movementState.bird.rotationSpeed * 180/Math.PI / 2));
+      map.setBearing((map.getBearing() - 1) % 360);
     }
     if (movementState.bird.right) {
-      map.setBearing(map.getBearing() + (movementState.bird.rotationSpeed * 180/Math.PI / 2));
+      map.setBearing((map.getBearing() + 1) % 360);
     }
     
-    // Handle movement
+    // Step 2: Get current map bearing in radians
+    const bearingRad = map.getBearing() * Math.PI / 180;
+    
+    // Step 3: Calculate forward direction based on map bearing
+    birdForwardDirection.x = Math.sin(bearingRad);
+    birdForwardDirection.z = Math.cos(bearingRad);
+    birdForwardDirection.normalize();
+    
+    // Step 4: Always orient the container to match map bearing
+    // This is critical - the container rotates to match the map
+    // But the bird always faces forward relative to the container
+    birdContainer.rotation.y = bearingRad;
+    
+    // Step 5: Move the container forward/backward
     if (movementState.bird.forward) {
-      currentBird.position.addScaledVector(birdForwardDirection, movementState.bird.speed);
+      birdContainer.position.addScaledVector(birdForwardDirection, movementState.bird.speed);
     }
     if (movementState.bird.backward) {
-      currentBird.position.addScaledVector(birdForwardDirection, -movementState.bird.speed);
+      birdContainer.position.addScaledVector(birdForwardDirection, -movementState.bird.speed);
     }
     
-    // Keep walking animation synchronized with movement
-    syncWalkingAnimationWithMovement();
-    
-    // Update map and camera
-    const birdPos = currentBird.position;
+    // Step 6: Update map center
+    const containerPos = birdContainer.position;
     map.setCenter([
-      initialCenter.lng + (birdPos.x / 5000),
-      initialCenter.lat + (birdPos.z / 5000)
+      initialCenter.lng + (containerPos.x / 5000),
+      initialCenter.lat + (containerPos.z / 5000)
     ]);
     
-    updateCameraPosition();
+    // Step 7: Synchronize walking animation
+    syncWalkingAnimationWithMovement();
+    
+    // Step 8: Update camera to always be behind the bird
+    // Use the negative of forward direction to position camera behind
+    const cameraOffset = birdForwardDirection.clone().multiplyScalar(-cameraSettings.distance);
+    cameraOffset.y = 5; // Add height
+    
+    const targetCameraPos = birdContainer.position.clone().add(cameraOffset);
+    camera.position.lerp(targetCameraPos, 0.1);
+    camera.lookAt(birdContainer.position);
   }
 
   renderer.render(scene, camera);
