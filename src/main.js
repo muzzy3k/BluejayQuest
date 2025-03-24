@@ -1,8 +1,7 @@
 import * as THREE from 'three';
 import mapboxgl from 'mapbox-gl';
 import { MAPBOX_ACCESS_TOKEN } from './config.js';
-import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js'; 
-import { AnimationMixer } from 'three';
+import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 
 // Optionally disable telemetry to avoid POST errors
 if (mapboxgl.setTelemetryEnabled) {
@@ -37,7 +36,7 @@ mapboxgl.accessToken = MAPBOX_ACCESS_TOKEN;
 const initialCenter = { lng: -76.589503, lat: 40.149641 };
 const map = new mapboxgl.Map({
   container: 'map',
-  style: 'mapbox://styles/mapbox/streets-v12',
+  style: 'mapbox://styles/islamm22/cm8nf8jjo002r01qd0zj8dj4k', // Use your custom style
   center: [initialCenter.lng, initialCenter.lat],
   zoom: 35,
   pitch: 75,
@@ -595,57 +594,67 @@ function setupTerrainAndBuildings() {
     map.setTerrain({ source: 'mapbox-dem', exaggeration: 1.5 });
   }
 
-  // Add 3D buildings layer if it doesn't exist
-  if (!map.getLayer('3d-buildings')) {
-    map.addLayer({
-      id: '3d-buildings',
-      source: 'composite',
-      'source-layer': 'building',
-      type: 'fill-extrusion',
-      minzoom: 15,
-      paint: {
-        'fill-extrusion-color': [
-          'match',
-          ['get', 'type'],
-          'education', '#FF8C00',
-          'commercial', '#4682B4',
-          'residential', '#CD5C5C',
-          '#BEBEBE'
-        ],
-        'fill-extrusion-height': [
-          'interpolate', ['linear'], ['zoom'],
-          15, 0,
-          15.05, ['*', ['get', 'height'], 1.2]
-        ],
-        'fill-extrusion-base': [
-          'interpolate', ['linear'], ['zoom'],
-          15, 0,
-          15.05, ['get', 'min_height']
-        ],
-        'fill-extrusion-opacity': 0.8
+  // Find the first symbol layer for proper placement
+  const layers = map.getStyle().layers;
+  const labelLayerId = layers.find(
+    (layer) => layer.type === 'symbol' && layer.layout && layer.layout['text-field']
+  )?.id;
+
+  // Remove existing 3D buildings layer if it exists
+  if (map.getLayer('3d-buildings')) {
+    map.removeLayer('3d-buildings');
+  }
+
+  // Add enhanced 3D buildings layer
+  map.addLayer({
+    id: '3d-buildings',
+    source: 'composite',
+    'source-layer': 'building',
+    'filter': ['==', 'extrude', 'true'],
+    type: 'fill-extrusion',
+    minzoom: 15,
+    paint: {
+      'fill-extrusion-color': [
+        'match',
+        ['get', 'type'],
+        'education', '#FF8C00',  // Keep your custom colors for different building types
+        'commercial', '#4682B4',
+        'residential', '#CD5C5C',
+        '#BEBEBE'
+      ],
+      'fill-extrusion-height': [
+        'interpolate', ['linear'], ['zoom'],
+        15, 0,
+        15.05, ['get', 'height'] // Use actual height from data
+      ],
+      'fill-extrusion-base': [
+        'interpolate', ['linear'], ['zoom'],
+        15, 0,
+        15.05, ['get', 'min_height']
+      ],
+      'fill-extrusion-opacity': 0.6
+    }
+  }, labelLayerId); // Add before labels for better visibility
+  
+  // Add a campus boundary polygon (if desired)
+  if (!map.getSource('campus-boundary')) {
+    map.addSource('campus-boundary', {
+      type: 'geojson',
+      data: {
+        type: 'Feature',
+        geometry: {
+          type: 'Polygon',
+          coordinates: [[
+            [-76.596720, 40.149641],
+            [-76.589503, 40.153440],
+            [-76.581853, 40.150569],
+            [-76.591676, 40.143198],
+            [-76.596720, 40.149641]
+          ]]
+        }
       }
     });
   }
-
-    // Add a campus boundary polygon (if desired)
-    if (!map.getSource('campus-boundary')) {
-      map.addSource('campus-boundary', {
-        type: 'geojson',
-        data: {
-          type: 'Feature',
-          geometry: {
-            type: 'Polygon',
-            coordinates: [[
-              [-76.596720, 40.149641],
-              [-76.589503, 40.153440],
-              [-76.581853, 40.150569],
-              [-76.591676, 40.143198],
-              [-76.596720, 40.149641]
-            ]]
-          }
-        }
-      });
-    }
 }
   
 // -----------------------------
