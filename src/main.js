@@ -35,6 +35,13 @@ let previousPosition = new THREE.Vector3();
 let collisionDetected = false;
 const collisionCheckDistance = 1.0; // Distance to check ahead for collisions
 
+// Add pitch control variables
+const pitchSettings = {
+  min: 0,
+  max: 85,
+  step: 5
+};
+
 // -----------------------------
 // Mapbox initialization
 // -----------------------------
@@ -480,6 +487,17 @@ window.addEventListener('keydown', (event) => {
     case 'ArrowRight':
       movementState.bird.right = true;
       break;
+    // Add pitch control keys
+    case 'a':
+    case 'A':
+      // Increase pitch (look down)
+      map.setPitch(Math.min(map.getPitch() + pitchSettings.step, pitchSettings.max));
+      break;
+    case 'z':
+    case 'Z':
+      // Decrease pitch (look up)
+      map.setPitch(Math.max(map.getPitch() - pitchSettings.step, pitchSettings.min));
+      break;
   }
 });
 
@@ -695,9 +713,52 @@ function setupTerrainAndBuildings() {
         15, 0,
         15.05, ['get', 'min_height']
       ],
-      'fill-extrusion-opacity': 1
+      'fill-extrusion-opacity': 0.7
     }
   }, labelLayerId); // Add before labels for better visibility
+  
+  // OPTION 1: Use dataset directly via GeoJSON
+  if (!map.getSource('custom-building-data')) {
+    // Get data directly from the dataset
+    map.addSource('custom-building-data', {
+      type: 'geojson',
+      data: `https://api.mapbox.com/datasets/v1/islamm22/cm8oiqyhp5mne1omogra1iz8j/features?access_token=${mapboxgl.accessToken}`
+    });
+    
+    // Add markers for each point
+    map.addLayer({
+      id: 'building-points',
+      source: 'custom-building-data',
+      type: 'circle',
+      paint: {
+        'circle-radius': 6,
+        'circle-color': '#FF0000',
+        'circle-stroke-width': 2,
+        'circle-stroke-color': '#FFFFFF'
+      }
+    });
+    
+    // Add labels - note we're using property "0" as shown in your GeoJSON
+    map.addLayer({
+      id: 'building-labels',
+      source: 'custom-building-data',
+      type: 'symbol',
+      layout: {
+        'text-field': ['get', '0'], // Use the property name "0" from your GeoJSON
+        'text-font': ['Open Sans Semibold', 'Arial Unicode MS Bold'],
+        'text-size': 12,
+        'text-offset': [0, 1.5], // Offset below the point
+        'text-anchor': 'top',
+        'text-allow-overlap': false,
+        'text-max-width': 12
+      },
+      paint: {
+        'text-color': '#FFFFFF',
+        'text-halo-color': '#000000',
+        'text-halo-width': 2
+      }
+    });
+  }
   
   // Add a campus boundary polygon (if desired)
   if (!map.getSource('campus-boundary')) {
