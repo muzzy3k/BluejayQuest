@@ -3,6 +3,9 @@ import mapboxgl from 'mapbox-gl';
 import { MAPBOX_ACCESS_TOKEN } from './config.js';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 
+"use strict";
+
+(function () {
 // Optionally disable telemetry to avoid POST errors
 if (mapboxgl.setTelemetryEnabled) {
   mapboxgl.setTelemetryEnabled(false);
@@ -28,6 +31,9 @@ const totalModelsToLoad = 2;
 
 // Add these variables at the top of your file
 let birdContainer = null; // Container to handle proper pivoting
+let previousPosition = new THREE.Vector3();
+let collisionDetected = false;
+const collisionCheckDistance = 1.0; // Distance to check ahead for collisions
 
 // -----------------------------
 // Mapbox initialization
@@ -518,6 +524,9 @@ function animate() {
   if (stillMixer) stillMixer.update(delta);
 
   if (birdContainer) {
+    // Save previous position for collision restoration
+    previousPosition.copy(birdContainer.position);
+    
     // Step 1: Handle map rotation first
     if (movementState.bird.left) {
       map.setBearing((map.getBearing() - 1) % 360);
@@ -540,11 +549,65 @@ function animate() {
     birdContainer.rotation.y = bearingRad;
     
     // Step 5: Move the container forward/backward
-    if (movementState.bird.forward) {
-      birdContainer.position.addScaledVector(birdForwardDirection, movementState.bird.speed);
-    }
-    if (movementState.bird.backward) {
-      birdContainer.position.addScaledVector(birdForwardDirection, -movementState.bird.speed);
+    if (movementState.bird.forward || movementState.bird.backward) {
+      // Calculate potential new position
+      const moveDirection = movementState.bird.forward ? 1 : -1;
+      const potentialMove = birdForwardDirection.clone().multiplyScalar(moveDirection * movementState.bird.speed);
+      const newPosition = birdContainer.position.clone().add(potentialMove);
+      
+      // Convert potential position to map coordinates
+      const newMapCoords = [
+        initialCenter.lng + (newPosition.x / 5000),
+        initialCenter.lat + (newPosition.z / 5000)
+      ];
+      
+      // Check for collision with buildings
+      const point = map.project(newMapCoords);
+      const features = map.queryRenderedFeatures(
+        [point.x, point.y],
+        { layers: ['3d-buildings'] }
+      );
+      
+      // If no buildings found at the new position, allow movement
+      if (features.length === 0) {
+        collisionDetected = false;
+        // Apply the movement
+        if (movementState.bird.forward) {
+          birdContainer.position.addScaledVector(birdForwardDirection, movementState.bird.speed);
+        }
+        if (movementState.bird.backward) {
+          birdContainer.position.addScaledVector(birdForwardDirection, -movementState.bird.speed);
+        }
+      } else {
+        // Collision detected - keep the previous position
+        collisionDetected = true;
+        birdContainer.position.copy(previousPosition);
+        
+        // Optional: Visual feedback for collision
+        if (collisionDetected) {
+          // You could change the bird color, add a sound effect, or show a message
+          console.log("Collision with building detected!");
+          
+          // Example: Briefly show a collision message
+          const collisionMessage = document.createElement('div');
+          collisionMessage.style.position = 'fixed';
+          collisionMessage.style.top = '20px';
+          collisionMessage.style.left = '50%';
+          collisionMessage.style.transform = 'translateX(-50%)';
+          collisionMessage.style.padding = '10px';
+          collisionMessage.style.backgroundColor = 'rgba(255, 0, 0, 0.7)';
+          collisionMessage.style.color = 'white';
+          collisionMessage.style.borderRadius = '5px';
+          collisionMessage.style.fontFamily = 'sans-serif';
+          collisionMessage.textContent = 'Ouch! Ran into a building!';
+          document.body.appendChild(collisionMessage);
+          
+          // Remove after 1 second
+          setTimeout(() => {
+            document.body.removeChild(collisionMessage);
+          }, 1000);
+        }
+      }
     }
     
     // Step 6: Update map center
@@ -632,7 +695,7 @@ function setupTerrainAndBuildings() {
         15, 0,
         15.05, ['get', 'min_height']
       ],
-      'fill-extrusion-opacity': 0.6
+      'fill-extrusion-opacity': 1
     }
   }, labelLayerId); // Add before labels for better visibility
   
@@ -664,3 +727,5 @@ map.on('load', () => {
   console.log('Map loaded');
   setupTerrainAndBuildings();
 });
+
+})();
