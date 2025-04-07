@@ -6,42 +6,483 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 "use strict";
 
 (function () {
-// Optionally disable telemetry to avoid POST errors
-if (mapboxgl.setTelemetryEnabled) {
-  mapboxgl.setTelemetryEnabled(false);
+  // Add a variable to track the selected character model
+  let selectedCharacter = '';
+  const modelSets = {
+    'original': {
+      standing: '/assets/Standing.fbx',
+      walking: '/assets/Walking.fbx'
+    },
+    'b': {
+      standing: '/assets/StandingB.fbx',
+      walking: '/assets/WalkingB.fbx'
+    }
+  };
+  
+  // Create character selection screen
+  const characterSelectionScreen = document.createElement('div');
+  characterSelectionScreen.id = 'character-selection-screen';
+  characterSelectionScreen.style.position = 'fixed';
+  characterSelectionScreen.style.top = '0';
+  characterSelectionScreen.style.left = '0';
+  characterSelectionScreen.style.width = '100%';
+  characterSelectionScreen.style.height = '100%';
+  characterSelectionScreen.style.backgroundColor = '#333';
+  characterSelectionScreen.style.display = 'flex';
+  characterSelectionScreen.style.flexDirection = 'column';
+  characterSelectionScreen.style.justifyContent = 'center';
+  characterSelectionScreen.style.alignItems = 'center';
+  characterSelectionScreen.style.zIndex = '10000';
+  
+  // Create a header
+  const header = document.createElement('h1');
+  header.textContent = 'Select Your Character';
+  header.style.color = 'white';
+  header.style.fontFamily = 'sans-serif';
+  header.style.marginBottom = '40px';
+  
+  // Create container for characters
+  const charactersContainer = document.createElement('div');
+  charactersContainer.style.display = 'flex';
+  charactersContainer.style.justifyContent = 'space-around';
+  charactersContainer.style.width = '80%';
+  charactersContainer.style.maxWidth = '800px';
+  
+  // Create character options with preview
+  for (const [key, value] of Object.entries(modelSets)) {
+    const characterOption = document.createElement('div');
+    characterOption.classList.add('character-option');
+    characterOption.style.display = 'flex';
+    characterOption.style.flexDirection = 'column';
+    characterOption.style.alignItems = 'center';
+    characterOption.style.cursor = 'pointer';
+    characterOption.style.padding = '20px';
+    characterOption.style.borderRadius = '10px';
+    characterOption.style.transition = 'background-color 0.3s';
+    
+    // Preview area (will be filled with THREE.js)
+    const previewArea = document.createElement('div');
+    previewArea.classList.add('preview-area');
+    previewArea.style.width = '300px';
+    previewArea.style.height = '300px';
+    previewArea.style.backgroundColor = '#222';
+    previewArea.style.borderRadius = '5px';
+    previewArea.style.marginBottom = '15px';
+    previewArea.dataset.character = key;
+    
+    // Character name
+    const characterName = document.createElement('h2');
+    characterName.textContent = key === 'original' ? 'Blue' : 'Pink';
+    characterName.style.color = 'white';
+    characterName.style.fontFamily = 'sans-serif';
+    
+    // Selection indicator
+    const selectionIndicator = document.createElement('div');
+    selectionIndicator.classList.add('selection-indicator');
+    selectionIndicator.textContent = 'Select';
+    selectionIndicator.style.backgroundColor = key === 'original' ? '#3498db' : '#e74c3c';
+    selectionIndicator.style.color = 'white';
+    selectionIndicator.style.padding = '8px 20px';
+    selectionIndicator.style.borderRadius = '5px';
+    selectionIndicator.style.marginTop = '10px';
+    selectionIndicator.style.fontFamily = 'sans-serif';
+    
+    characterOption.appendChild(previewArea);
+    characterOption.appendChild(characterName);
+    characterOption.appendChild(selectionIndicator);
+    
+    // Handle click to select character
+    characterOption.addEventListener('click', () => {
+      // Remove highlight from all options
+      document.querySelectorAll('.character-option').forEach(option => {
+        option.style.backgroundColor = 'transparent';
+      });
+      
+      // Highlight selected option
+      characterOption.style.backgroundColor = 'rgba(255,255,255,0.1)';
+      
+      // Set the selected character
+      selectedCharacter = key;
+    });
+    
+    charactersContainer.appendChild(characterOption);
+  }
+  
+  // Create start button
+  const startButton = document.createElement('button');
+  startButton.textContent = 'Start Game';
+  startButton.style.marginTop = '40px';
+  startButton.style.padding = '12px 30px';
+  startButton.style.borderRadius = '5px';
+  startButton.style.backgroundColor = '#4CAF50';
+  startButton.style.color = 'white';
+  startButton.style.border = 'none';
+  startButton.style.fontSize = '18px';
+  startButton.style.cursor = 'pointer';
+  startButton.style.fontFamily = 'sans-serif';
+  startButton.style.transition = 'background-color 0.3s';
+  
+  startButton.addEventListener('mouseover', () => {
+    startButton.style.backgroundColor = '#45a049';
+  });
+  
+  startButton.addEventListener('mouseout', () => {
+    startButton.style.backgroundColor = '#4CAF50';
+  });
+  
+  // Add components to selection screen
+  characterSelectionScreen.appendChild(header);
+  characterSelectionScreen.appendChild(charactersContainer);
+  characterSelectionScreen.appendChild(startButton);
+  
+  // Add selection screen to the document body
+  document.body.appendChild(characterSelectionScreen);
+  
+  // Initialize THREE.js for character previews
+  const previewRenderers = {};
+  const previewScenes = {};
+  const previewCameras = {};
+  
+  // Set up preview scenes for each character
+  function setupCharacterPreviews() {
+    document.querySelectorAll('.preview-area').forEach(previewArea => {
+      const character = previewArea.dataset.character;
+      
+      // Create scene
+      const scene = new THREE.Scene();
+      previewScenes[character] = scene;
+      
+      // Create camera
+      const camera = new THREE.PerspectiveCamera(
+        45, previewArea.clientWidth / previewArea.clientHeight, 0.1, 1000
+      );
+      camera.position.set(0, 2, 5);
+      previewCameras[character] = camera;
+      
+      // Create renderer
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(previewArea.clientWidth, previewArea.clientHeight);
+      renderer.setClearColor(0x222222);
+      previewArea.appendChild(renderer.domElement);
+      previewRenderers[character] = renderer;
+      
+      // Add lights
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.8); // Increased from 0.5 to 0.8
+      scene.add(ambientLight);
+      
+      const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0); // Increased from 0.8 to 1.0
+      directionalLight.position.set(0, 10, 10);
+      scene.add(directionalLight);
+      
+      // Add a secondary light from another angle for better model illumination
+      const secondaryLight = new THREE.DirectionalLight(0xffffff, 0.6);
+      secondaryLight.position.set(5, 5, -10); // Light from opposite side
+      scene.add(secondaryLight);
+      
+      // Optional: Add a soft spotlight to highlight the model
+      const spotLight = new THREE.SpotLight(0xffffff, 0.7);
+      spotLight.position.set(0, 10, 2);
+      spotLight.angle = Math.PI / 4;
+      spotLight.penumbra = 0.6; // Soft edge
+      spotLight.distance = 20;
+      scene.add(spotLight);
+      
+      // Load character model for preview
+      const fbxLoader = new FBXLoader();
+      const modelPath = modelSets[character].standing;
+      
+      fbxLoader.load(modelPath, (fbx) => {
+        // Scale and position model appropriately
+        fbx.scale.set(0.01, 0.015, 0.01);
+        
+        // Set up rotation for nice preview
+        fbx.rotation.y = Math.PI; // Facing forward
+        
+        // Add to scene
+        scene.add(fbx);
+        
+        // Setup animation if available
+        if (fbx.animations && fbx.animations.length > 0) {
+          const mixer = new THREE.AnimationMixer(fbx);
+          const action = mixer.clipAction(fbx.animations[0]);
+          action.play();
+          
+          // Store mixer for animation updates
+          previewScenes[character].userData.mixer = mixer;
+        }
+      });
+    });
+  }
+  
+  // Animation loop for previews
+  const previewClock = new THREE.Clock();
+  
+  function animatePreviews() {
+    if (document.getElementById('character-selection-screen').style.display !== 'none') {
+      requestAnimationFrame(animatePreviews);
+      
+      const delta = previewClock.getDelta();
+      
+      // Update all preview scenes
+      for (const character in previewScenes) {
+        if (previewScenes[character].userData.mixer) {
+          previewScenes[character].userData.mixer.update(delta);
+        }
+        
+        // Rotate the model slightly for showcase
+        previewScenes[character].children.forEach(child => {
+          if (child.type === 'Group') {
+            child.rotation.y += 0.01;
+          }
+        });
+        
+        previewRenderers[character].render(previewScenes[character], previewCameras[character]);
+      }
+    }
+  }
+  
+  // Initialize preview scenes when window is loaded
+  window.addEventListener('load', () => {
+    setupCharacterPreviews();
+    animatePreviews();
+  });
+  
+  // Handle start button click
+  startButton.addEventListener('click', () => {
+    if (!selectedCharacter) {
+      alert('Please select a character first!');
+      return;
+    }
+    
+    // Hide character selection screen
+    characterSelectionScreen.style.display = 'none';
+    
+    // Start loading the game with selected character
+    initializeGame(selectedCharacter);
+  });
+  
+// Create a controls info panel
+function createControlsPanel() {
+  const controlsPanel = document.createElement('div');
+  controlsPanel.id = 'controls-panel';
+  controlsPanel.style.position = 'fixed';
+  controlsPanel.style.top = '15px';
+  controlsPanel.style.left = '15px';
+  controlsPanel.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+  controlsPanel.style.color = 'white';
+  controlsPanel.style.padding = '15px';
+  controlsPanel.style.borderRadius = '8px';
+  controlsPanel.style.fontFamily = 'sans-serif';
+  controlsPanel.style.fontSize = '14px';
+  controlsPanel.style.zIndex = '1000';
+  controlsPanel.style.maxWidth = '250px';
+  controlsPanel.style.boxShadow = '0 4px 6px rgba(0, 0, 0, 0.1)';
+  controlsPanel.style.cursor = 'move'; // Indicate panel is draggable
+  controlsPanel.style.transition = 'height 0.3s ease';
+  
+  // Create a handle for dragging
+  const dragHandle = document.createElement('div');
+  dragHandle.style.padding = '5px 0';
+  dragHandle.style.marginBottom = '10px';
+  dragHandle.style.borderBottom = '1px solid rgba(255, 255, 255, 0.2)';
+  dragHandle.style.cursor = 'move';
+  dragHandle.style.display = 'flex';
+  dragHandle.style.justifyContent = 'space-between';
+  dragHandle.style.alignItems = 'center';
+  
+  // Panel header within the drag handle
+  const header = document.createElement('h3');
+  header.textContent = 'Game Controls';
+  header.style.margin = '0';
+  header.style.fontSize = '16px';
+  header.style.fontWeight = 'bold';
+  dragHandle.appendChild(header);
+  
+  // Create content container for easy hiding/showing
+  const contentContainer = document.createElement('div');
+  contentContainer.id = 'controls-content';
+  
+  // Control instructions
+  const controlsList = document.createElement('ul');
+  controlsList.style.listStyleType = 'none';
+  controlsList.style.padding = '0';
+  controlsList.style.margin = '0';
+  
+  // List of controls
+  const controls = [
+    { key: '↑/↓', action: 'Move forward/backward' },
+    { key: '←/→', action: 'Turn left/right' },
+    { key: 'Mouse Wheel', action: 'Zoom in/out' },
+    { key: 'Q', action: 'Look up' },
+    { key: 'E', action: 'Look down' }
+  ];
+  
+  controls.forEach(control => {
+    const item = document.createElement('li');
+    item.style.margin = '5px 0';
+    item.style.display = 'flex';
+    item.style.alignItems = 'center';
+    
+    const keySpan = document.createElement('span');
+    keySpan.textContent = control.key;
+    keySpan.style.backgroundColor = '#444';
+    keySpan.style.padding = '3px 8px';
+    keySpan.style.borderRadius = '4px';
+    keySpan.style.marginRight = '10px';
+    keySpan.style.fontFamily = 'monospace';
+    keySpan.style.fontWeight = 'bold';
+    keySpan.style.minWidth = '80px';
+    keySpan.style.display = 'inline-block';
+    keySpan.style.textAlign = 'center';
+    
+    const actionSpan = document.createElement('span');
+    actionSpan.textContent = control.action;
+    
+    item.appendChild(keySpan);
+    item.appendChild(actionSpan);
+    controlsList.appendChild(item);
+  });
+  
+  contentContainer.appendChild(controlsList);
+  
+  // Add minimize/maximize button (instead of close)
+  const toggleButton = document.createElement('button');
+  toggleButton.textContent = '−'; // Unicode minus sign
+  toggleButton.style.backgroundColor = 'transparent';
+  toggleButton.style.border = 'none';
+  toggleButton.style.color = 'white';
+  toggleButton.style.fontSize = '20px';
+  toggleButton.style.cursor = 'pointer';
+  toggleButton.style.padding = '0';
+  toggleButton.style.lineHeight = '1';
+  toggleButton.style.width = '24px';
+  toggleButton.style.height = '24px';
+  toggleButton.title = "Minimize";
+  
+  // Create a show controls button (initially hidden)
+  const showControlsButton = document.createElement('span');
+  showControlsButton.textContent = 'Show Controls';
+  showControlsButton.style.display = 'none'; // Initially hidden
+  showControlsButton.style.cursor = 'pointer';
+  showControlsButton.style.fontWeight = 'bold';
+  
+  let minimized = false;
+  
+  toggleButton.addEventListener('click', () => {
+    minimized = !minimized;
+    
+    if (minimized) {
+      // Minimize panel
+      contentContainer.style.display = 'none';
+      showControlsButton.style.display = 'inline';
+      toggleButton.textContent = '+';
+      toggleButton.title = "Expand";
+      controlsPanel.style.padding = '10px 15px';
+    } else {
+      // Expand panel
+      contentContainer.style.display = 'block';
+      showControlsButton.style.display = 'none';
+      toggleButton.textContent = '−';
+      toggleButton.title = "Minimize";
+      controlsPanel.style.padding = '15px';
+    }
+  });
+  
+  showControlsButton.addEventListener('click', () => {
+    minimized = false;
+    contentContainer.style.display = 'block';
+    showControlsButton.style.display = 'none';
+    toggleButton.textContent = '−';
+    toggleButton.title = "Minimize";
+    controlsPanel.style.padding = '15px';
+  });
+  
+  // Add the toggle button to drag handle
+  dragHandle.appendChild(toggleButton);
+  
+  // Add elements to the panel
+  controlsPanel.appendChild(dragHandle);
+  dragHandle.appendChild(showControlsButton);
+  controlsPanel.appendChild(contentContainer);
+  
+  document.body.appendChild(controlsPanel);
+  
+  // Make the panel draggable
+  let isDragging = false;
+  let offsetX, offsetY;
+  
+  dragHandle.addEventListener('mousedown', (e) => {
+    isDragging = true;
+    offsetX = e.clientX - controlsPanel.getBoundingClientRect().left;
+    offsetY = e.clientY - controlsPanel.getBoundingClientRect().top;
+    controlsPanel.style.cursor = 'grabbing';
+    
+    // Prevent default text selection during drag
+    e.preventDefault();
+  });
+  
+  document.addEventListener('mousemove', (e) => {
+    if (!isDragging) return;
+    
+    const left = e.clientX - offsetX;
+    const top = e.clientY - offsetY;
+    
+    // Keep panel within window bounds
+    const maxX = window.innerWidth - controlsPanel.offsetWidth;
+    const maxY = window.innerHeight - controlsPanel.offsetHeight;
+    
+    controlsPanel.style.left = `${Math.max(0, Math.min(left, maxX))}px`;
+    controlsPanel.style.top = `${Math.max(0, Math.min(top, maxY))}px`;
+  });
+  
+  document.addEventListener('mouseup', () => {
+    if (isDragging) {
+      isDragging = false;
+      controlsPanel.style.cursor = 'move';
+    }
+  });
 }
 
-const loadingScreen = document.createElement('div');
-loadingScreen.style.position = 'fixed';
-loadingScreen.style.top = '0';
-loadingScreen.style.left = '0';
-loadingScreen.style.width = '100%';
-loadingScreen.style.height = '100%';
-loadingScreen.style.backgroundColor = '#333';
-loadingScreen.style.display = 'flex';
-loadingScreen.style.justifyContent = 'center';
-loadingScreen.style.alignItems = 'center';
-loadingScreen.style.zIndex = '9999';
-loadingScreen.innerHTML = '<h1 style="color: white; font-family: sans-serif;">Loading 3D Models...</h1>';
-document.body.appendChild(loadingScreen);
+  // Move existing map initialization and other setup into a function
+  function initializeGame(characterType) {
+    // Optionally disable telemetry to avoid POST errors
+    if (mapboxgl.setTelemetryEnabled) {
+      mapboxgl.setTelemetryEnabled(false);
+    }
+  
+    // Create loading screen for model loading
+    const loadingScreen = document.createElement('div');
+    loadingScreen.style.position = 'fixed';
+    loadingScreen.style.top = '0';
+    loadingScreen.style.left = '0';
+    loadingScreen.style.width = '100%';
+    loadingScreen.style.height = '100%';
+    loadingScreen.style.backgroundColor = '#333';
+    loadingScreen.style.display = 'flex';
+    loadingScreen.style.justifyContent = 'center';
+    loadingScreen.style.alignItems = 'center';
+    loadingScreen.style.zIndex = '9999';
+    loadingScreen.innerHTML = '<h1 style="color: white; font-family: sans-serif;">Loading 3D Models...</h1>';
+    document.body.appendChild(loadingScreen);
+  
+    // Keep track of loaded models
+    let modelsLoaded = 0;
+    const totalModelsToLoad = 2;
+  
+    // Add these variables at the top of your file
+    let birdContainer = null; // Container to handle proper pivoting
+    let previousPosition = new THREE.Vector3();
+    let collisionDetected = false;
+    const collisionCheckDistance = 1.0; // Distance to check ahead for collisions
+  
+    // Add pitch control variables
+    const pitchSettings = {
+      min: 0,
+      max: 85,
+      step: 5
+    };
 
-// Keep track of loaded models
-let modelsLoaded = 0;
-const totalModelsToLoad = 2;
-
-// Add these variables at the top of your file
-let birdContainer = null; // Container to handle proper pivoting
-let previousPosition = new THREE.Vector3();
-let collisionDetected = false;
-const collisionCheckDistance = 1.0; // Distance to check ahead for collisions
-
-// Add pitch control variables
-const pitchSettings = {
-  min: 0,
-  max: 85,
-  step: 5
-};
-
+    const modelPaths = modelSets[characterType];
 // -----------------------------
 // Mapbox initialization
 // -----------------------------
@@ -99,14 +540,28 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 threeContainer.appendChild(renderer.domElement);
 
 // Basic lighting
-const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.75); // Increased from 0.5 to 0.75
 scene.add(ambientLight);
-const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+
+const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0); // Increased from 0.8 to 1.0
 directionalLight.position.set(100, 100, 50);
 directionalLight.castShadow = true;
 directionalLight.shadow.mapSize.width = 2048;
 directionalLight.shadow.mapSize.height = 2048;
 scene.add(directionalLight);
+
+// Add a secondary directional light to reduce harsh shadows
+const secondaryLight = new THREE.DirectionalLight(0xffffff, 0.5);
+secondaryLight.position.set(-50, 80, -50); // Light from another angle
+scene.add(secondaryLight);
+
+// Add a hemisphere light for more natural environmental lighting
+const hemisphereLight = new THREE.HemisphereLight(
+  0xffffff, // sky color
+  0x444444, // ground color
+  0.5       // intensity
+);
+scene.add(hemisphereLight);
 
 // -----------------------------
 // Camera and zoom settings
@@ -153,7 +608,7 @@ let birdYRotation = Math.PI; // Initialize to PI (180 degrees) to match initial 
 
 // Load both models
 // First, load the still model
-fbxLoader.load('/assets/Standing.fbx', (fbx) => {
+fbxLoader.load(modelPaths.standing, (fbx) => {
   stillBird = fbx;
   stillBird.scale.set(0.0095, 0.0095, 0.0095); 
   
@@ -238,6 +693,7 @@ fbxLoader.load('/assets/Standing.fbx', (fbx) => {
   modelsLoaded++;
   if (modelsLoaded === totalModelsToLoad) {
     document.body.removeChild(loadingScreen);
+    createControlsPanel();
   }
   
   console.log('Standing bird model loaded.');
@@ -259,7 +715,7 @@ let lastPosition = new THREE.Vector3();
 let cycleDistance = 0; //
 
 // Then, load the walking model
-fbxLoader.load('/assets/Walking.fbx', (fbx) => {
+fbxLoader.load(modelPaths.walking, (fbx) => {
   walkingBird = fbx;
   walkingBird.scale.set(0.01, 0.01, 0.01);
   
@@ -346,6 +802,7 @@ fbxLoader.load('/assets/Walking.fbx', (fbx) => {
   modelsLoaded++;
   if (modelsLoaded === totalModelsToLoad) {
     document.body.removeChild(loadingScreen);
+    createControlsPanel();
   }
   
   console.log('Walking bird model loaded.');
@@ -488,13 +945,13 @@ window.addEventListener('keydown', (event) => {
       movementState.bird.right = true;
       break;
     // Add pitch control keys
-    case 'a':
-    case 'A':
+    case 'q':
+    case 'Q':
       // Increase pitch (look down)
       map.setPitch(Math.min(map.getPitch() + pitchSettings.step, pitchSettings.max));
       break;
-    case 'z':
-    case 'Z':
+    case 'e':
+    case 'E':
       // Decrease pitch (look up)
       map.setPitch(Math.max(map.getPitch() - pitchSettings.step, pitchSettings.min));
       break;
@@ -789,4 +1246,5 @@ map.on('load', () => {
   setupTerrainAndBuildings();
 });
 
+}
 })();
