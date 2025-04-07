@@ -2,10 +2,29 @@ import * as THREE from 'three';
 import mapboxgl from 'mapbox-gl';
 import { MAPBOX_ACCESS_TOKEN } from './config.js';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
+import { createLoginScreen, checkUserLoggedIn } from './loginScreen.js'
+import { getCurrentUser, signOut } from './auth.js'
 
 "use strict";
 
-(function () {
+(async function () {
+    // Check if user is logged in
+    const isLoggedIn = await checkUserLoggedIn()
+  
+    if (!isLoggedIn) {
+      // Show login screen if not logged in
+      const loginScreen = createLoginScreen()
+      document.body.appendChild(loginScreen)
+      
+      // Exit early, don't load the game yet
+      return
+    }
+    
+    // User is logged in, get their details
+    const user = await getCurrentUser()
+    console.log('Logged in user:', user)
+
+
   // Add a variable to track the selected character model
   let selectedCharacter = '';
   const modelSets = {
@@ -19,6 +38,31 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
     }
   };
   
+  function addSignOutButton() {
+    const signOutBtn = document.createElement('button')
+    signOutBtn.textContent = 'Sign Out'
+    signOutBtn.style.position = 'fixed'
+    signOutBtn.style.bottom = '20px' // Changed from top to bottom
+    signOutBtn.style.right = '20px'
+    signOutBtn.style.zIndex = '10001'
+    signOutBtn.style.padding = '8px 12px'
+    signOutBtn.style.backgroundColor = '#e74c3c'
+    signOutBtn.style.color = 'white'
+    signOutBtn.style.border = 'none'
+    signOutBtn.style.borderRadius = '4px'
+    signOutBtn.style.cursor = 'pointer'
+    signOutBtn.style.boxShadow = '0 2px 5px rgba(0,0,0,0.2)' // Added shadow for better visibility
+    
+    signOutBtn.addEventListener('click', async () => {
+      const { success } = await signOut()
+      if (success) {
+        window.location.reload() // Reload to show login screen
+      }
+    })
+    
+    document.body.appendChild(signOutBtn)
+  }
+
   // Create character selection screen
   const characterSelectionScreen = document.createElement('div');
   characterSelectionScreen.id = 'character-selection-screen';
@@ -138,6 +182,8 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
   // Add selection screen to the document body
   document.body.appendChild(characterSelectionScreen);
   
+
+
   // Initialize THREE.js for character previews
   const previewRenderers = {};
   const previewScenes = {};
@@ -218,7 +264,16 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
   const previewClock = new THREE.Clock();
   
   function animatePreviews() {
-    if (document.getElementById('character-selection-screen').style.display !== 'none') {
+    // First check if the element exists before accessing its properties
+    const characterSelectionScreen = document.getElementById('character-selection-screen');
+    
+    if (!characterSelectionScreen) {
+      // Element doesn't exist yet, try again on next frame
+      requestAnimationFrame(animatePreviews);
+      return;
+    }
+    
+    if (characterSelectionScreen.style.display !== 'none') {
       requestAnimationFrame(animatePreviews);
       
       const delta = previewClock.getDelta();
@@ -231,7 +286,7 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
         
         // Rotate the model slightly for showcase
         previewScenes[character].children.forEach(child => {
-          if (child.type === 'Group') {
+          if (child.type === 'Group' || child.type === 'Object3D') {
             child.rotation.y += 0.01;
           }
         });
@@ -240,12 +295,9 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
       }
     }
   }
-  
-  // Initialize preview scenes when window is loaded
-  window.addEventListener('load', () => {
-    setupCharacterPreviews();
-    animatePreviews();
-  });
+
+  setupCharacterPreviews();
+  animatePreviews();
   
   // Handle start button click
   startButton.addEventListener('click', () => {
@@ -257,6 +309,8 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
     // Hide character selection screen
     characterSelectionScreen.style.display = 'none';
     
+    addSignOutButton()
+
     // Start loading the game with selected character
     initializeGame(selectedCharacter);
   });
