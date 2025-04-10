@@ -4,10 +4,14 @@ import { MAPBOX_ACCESS_TOKEN } from './config.js';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { createLoginScreen, checkUserLoggedIn } from './loginScreen.js'
 import { getCurrentUser, signOut } from './auth.js'
+import { createCachedFBXLoader, registerServiceWorker } from './modelCache.js';
 
 "use strict";
 
 (async function () {
+
+    registerServiceWorker();
+
     // Check if user is logged in
     const isLoggedIn = await checkUserLoggedIn()
   
@@ -234,31 +238,51 @@ import { getCurrentUser, signOut } from './auth.js'
       scene.add(spotLight);
       
       // Load character model for preview
-      const fbxLoader = new FBXLoader();
+      const fbxLoader = createCachedFBXLoader();
       const modelPath = modelSets[character].standing;
       
-      fbxLoader.load(modelPath, (fbx) => {
-        // Scale and position model appropriately
+      const loadingIndicator = document.createElement('div');
+      loadingIndicator.textContent = 'Loading model...';
+      loadingIndicator.style.color = 'white';
+      loadingIndicator.style.position = 'absolute';
+      loadingIndicator.style.top = '50%';
+      loadingIndicator.style.left = '50%';
+      loadingIndicator.style.transform = 'translate(-50%, -50%)';
+      previewArea.appendChild(loadingIndicator);
+
+    fbxLoader.load(modelPath, 
+      (fbx) => {
+        // Remove loading indicator
+        previewArea.removeChild(loadingIndicator);
+        
+        // Scale and position model as before
         fbx.scale.set(0.01, 0.015, 0.01);
-        
-        // Set up rotation for nice preview
-        fbx.rotation.y = Math.PI; // Facing forward
-        
-        // Add to scene
+        fbx.rotation.y = Math.PI;
         scene.add(fbx);
         
-        // Setup animation if available
+        // Setup animation if available as before
         if (fbx.animations && fbx.animations.length > 0) {
           const mixer = new THREE.AnimationMixer(fbx);
           const action = mixer.clipAction(fbx.animations[0]);
           action.play();
-          
-          // Store mixer for animation updates
           previewScenes[character].userData.mixer = mixer;
         }
-      });
-    });
-  }
+      },
+      (xhr) => {
+        // Show loading progress
+        if (xhr.lengthComputable) {
+          const percent = (xhr.loaded / xhr.total * 100).toFixed(0);
+          loadingIndicator.textContent = `${percent}%`;
+        }
+      },
+      (error) => {
+        console.error(`Error loading model: ${error}`);
+        loadingIndicator.textContent = 'Error loading model';
+        loadingIndicator.style.color = 'red';
+      }
+    );
+  });
+}
   
   // Animation loop for previews
   const previewClock = new THREE.Clock();
@@ -513,10 +537,29 @@ function createControlsPanel() {
     loadingScreen.style.height = '100%';
     loadingScreen.style.backgroundColor = '#333';
     loadingScreen.style.display = 'flex';
+    loadingScreen.style.flexDirection = 'column'; 
     loadingScreen.style.justifyContent = 'center';
     loadingScreen.style.alignItems = 'center';
     loadingScreen.style.zIndex = '9999';
     loadingScreen.innerHTML = '<h1 style="color: white; font-family: sans-serif;">Loading 3D Models...</h1>';
+
+      // Create header and status elements
+    const loadingHeader = document.createElement('h1');
+    loadingHeader.style.color = 'white';
+    loadingHeader.style.fontFamily = 'sans-serif';
+    loadingHeader.textContent = 'Loading 3D Models...';
+    
+    // Add status text that will update
+    const loadingStatus = document.createElement('div');
+    loadingStatus.style.color = '#aaaaaa';
+    loadingStatus.style.fontFamily = 'sans-serif';
+    loadingStatus.style.marginTop = '15px';
+    loadingStatus.textContent = 'Checking cache...';
+    
+    // Add the elements to the loading screen
+    loadingScreen.appendChild(loadingHeader);
+  loadingScreen.appendChild(loadingStatus);
+
     document.body.appendChild(loadingScreen);
   
     // Keep track of loaded models
@@ -534,6 +577,11 @@ function createControlsPanel() {
       min: 0,
       max: 85,
       step: 5
+    };
+
+    const loadStatus = {
+      standing: { loaded: false, fromCache: false, startTime: performance.now() },
+      walking: { loaded: false, fromCache: false, startTime: performance.now() }
     };
 
     const modelPaths = modelSets[characterType];
@@ -630,7 +678,7 @@ const cameraSettings = {
 // -----------------------------
 // Bird Model Integration
 // -----------------------------
-const fbxLoader = new FBXLoader();
+const fbxLoader = createCachedFBXLoader();
 let stillBird = null;
 let walkingBird = null;
 let currentBird = null; // Reference to the currently active bird model
@@ -663,6 +711,15 @@ let birdYRotation = Math.PI; // Initialize to PI (180 degrees) to match initial 
 // Load both models
 // First, load the still model
 fbxLoader.load(modelPaths.standing, (fbx) => {
+        // Check if loaded from cache (fast load = from cache)
+        loadStatus.standing.loaded = true;
+        const loadTime = performance.now() - loadStatus.standing.startTime;
+        loadStatus.standing.fromCache = loadTime < 300;
+        loadStatus.standing.loadTime = loadTime;
+        
+        // Update status
+        updateLoadingStatus(loadStatus, loadingStatus);
+
   stillBird = fbx;
   stillBird.scale.set(0.0095, 0.0095, 0.0095); 
   
@@ -752,12 +809,18 @@ fbxLoader.load(modelPaths.standing, (fbx) => {
   
   console.log('Standing bird model loaded.');
 }, 
-(xhr) => {
-  const percentComplete = (xhr.loaded / xhr.total) * 100;
-  loadingScreen.innerHTML = `<h1 style="color: white; font-family: sans-serif;">Loading Standing Model: ${Math.round(percentComplete)}%</h1>`;
+    (xhr) => {
+      if (xhr.lengthComputable) {
+        const percentComplete = (xhr.loaded / xhr.total * 100);
+        loadingHeader.textContent = `Loading Standing Model: ${Math.round(percentComplete)}%`;
+      }
 }, 
 (error) => {
   console.error('Error loading standing bird model:', error);
+
+  loadStatus.standing.error = true;
+  updateLoadingStatus(loadStatus, loadingStatus);
+
   modelsLoaded++;
   if (modelsLoaded === totalModelsToLoad) {
     document.body.removeChild(loadingScreen);
@@ -770,6 +833,13 @@ let cycleDistance = 0; //
 
 // Then, load the walking model
 fbxLoader.load(modelPaths.walking, (fbx) => {
+  loadStatus.walking.loaded = true;
+  const loadTime = performance.now() - loadStatus.walking.startTime;
+  loadStatus.walking.fromCache = loadTime < 300;
+  loadStatus.walking.loadTime = loadTime;
+  
+  updateLoadingStatus(loadStatus, loadingStatus);
+
   walkingBird = fbx;
   walkingBird.scale.set(0.01, 0.01, 0.01);
   
@@ -874,6 +944,25 @@ fbxLoader.load(modelPaths.walking, (fbx) => {
     document.body.removeChild(loadingScreen);
   }
 });
+
+function updateLoadingStatus(status, element) {
+  if (status.standing.loaded && status.walking.loaded) {
+    // Both models loaded
+    const standingFromCache = status.standing.fromCache ? 'from cache' : 'from server';
+    const walkingFromCache = status.walking.fromCache ? 'from cache' : 'from server';
+    
+    element.innerHTML = 
+      `Standing model loaded in ${status.standing.loadTime.toFixed(0)}ms ${standingFromCache}<br>` +
+      `Walking model loaded in ${status.walking.loadTime.toFixed(0)}ms ${walkingFromCache}<br>` +
+      `<strong>Models will be cached for faster loading next time!</strong>`;
+    
+    // Remove loading screen after showing this info briefly
+    setTimeout(() => {
+      document.body.removeChild(loadingScreen);
+      createControlsPanel();
+    }, 2000);
+  }
+}
 
 // Function to switch between bird models
 function switchBirdModel(isMoving) {
