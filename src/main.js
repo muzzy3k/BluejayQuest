@@ -5,6 +5,14 @@ import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { createLoginScreen, checkUserLoggedIn } from './loginScreen.js'
 import { getCurrentUser, signOut } from './auth.js'
 import { createCachedFBXLoader, registerServiceWorker } from './modelCache.js';
+import { 
+  addFishingSign, 
+  checkFishingSpotProximity, 
+  fishingGameState,
+  openFishingGame,
+  closeFishingGame,
+  castFishingLine
+} from './fishingGame.js';
 
 "use strict";
 
@@ -615,7 +623,7 @@ styleOptions.forEach(style => {
   link.className = 'style-option';
   link.onclick = (e) => {
     e.preventDefault();
-    map.setStyle('mapbox://styles/mapbox/' + style.id);
+    map.setStyle('mapbox://styles/mapbox/' + style.id);a
     
     // Listen for the style to finish loading, then re-add 3D features
     map.once('style.load', () => {
@@ -1098,6 +1106,21 @@ window.addEventListener('keydown', (event) => {
       // Decrease pitch (look up)
       map.setPitch(Math.max(map.getPitch() - pitchSettings.step, pitchSettings.min));
       break;
+    case 'f':
+    case 'F':
+      if (fishingGameState.isNearFishingSpot && !fishingGameState.isFishing) {
+        openFishingGame(movementState, switchBirdModel);
+      }
+      else if (fishingGameState.isFishing) {
+        // Call the casting function
+        castFishingLine();
+      }
+      break;
+    case 'Escape':
+      if (fishingGameState.isFishing) {
+        closeFishingGame(movementState);
+      }
+      break;
   }
 });
 
@@ -1248,6 +1271,9 @@ function animate() {
     camera.lookAt(birdContainer.position);
   }
 
+  // Check if player is near fishing spot
+  checkFishingSpotProximity(birdContainer, map);
+
   renderer.render(scene, camera);
 }
 animate();
@@ -1379,6 +1405,9 @@ function setupTerrainAndBuildings() {
       }
     });
   }
+
+  // Call the function to add the fishing sign
+  addFishingSign(scene, map, initialCenter);
 }
   
 // -----------------------------
