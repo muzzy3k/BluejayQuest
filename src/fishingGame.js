@@ -16,14 +16,15 @@ export const fishingGameState = {
   castingTime: 0,
   castingDuration: 0,
   playerInventory: {},
-  castingTimeout: null
+  castingTimeout: null,
+  mainSceneRod: null
 };
 
 // Define fish types and their catch probabilities
 export const fishTypes = {
   'Fathead Minnow': {
     probability: 0.6,
-    image: '/assets/fish/fathead_minnow.jpg', // Path relative to public folder
+    image: '/assets/fish/fathead_minnow.jpg', // Removed /public - paths should be relative to public folder
     size: { min: '3cm', max: '8cm' }
   },
   'Bluegill': {
@@ -81,7 +82,7 @@ export function addFishingSign(scene, map, initialCenter) {
       marker: marker,
       coordinates: fishingSpotCoords,
       position: coordsToPosition(fishingSpotCoords, initialCenter),
-      interactionDistance: 50 // Increased distance in meters to make it easier to find
+      interactionDistance: 10 // Reduced to 10 meters
     };
     
     return marker;
@@ -93,7 +94,7 @@ export function addFishingSign(scene, map, initialCenter) {
       marker: null,
       coordinates: fishingSpotCoords,
       position: coordsToPosition(fishingSpotCoords, initialCenter),
-      interactionDistance: 50 // Increased distance
+      interactionDistance: 10 // Reduced to 10 meters
     };
     
     return null;
@@ -119,9 +120,6 @@ export function checkFishingSpotProximity(birdContainer, map) {
   // Check if player is within interaction distance
   const wasNear = fishingGameState.isNearFishingSpot;
   fishingGameState.isNearFishingSpot = distanceInMeters < fishingGameState.fishingSign.interactionDistance;
-  
-  // Log the distance for debugging
-  console.log(`Distance to fishing spot: ${distanceInMeters.toFixed(1)}m, Near: ${fishingGameState.isNearFishingSpot}`);
   
   // If player just entered the interaction zone
   if (!wasNear && fishingGameState.isNearFishingSpot) {
@@ -165,8 +163,51 @@ export function hideInteractionPrompt() {
   }
 }
 
-// Open the fishing game
-export function openFishingGame(movementState, switchBirdModel) {
+// Add this function to create a fishing rod in the main scene
+export function createMainSceneFishingRod(scene, birdContainer) {
+  // Create a fishing rod attached to the bird/player
+  const rodGroup = new THREE.Group();
+  rodGroup.name = 'player-fishing-rod';
+  
+  // Create rod pole
+  const rodGeometry = new THREE.CylinderGeometry(0.03, 0.02, 2, 8);
+  const rodMaterial = new THREE.MeshStandardMaterial({ color: 0x8B4513 });
+  const rod = new THREE.Mesh(rodGeometry, rodMaterial);
+  rod.rotation.z = Math.PI / 4; // Angle the rod forward
+  rodGroup.add(rod);
+  
+  // Create fishing line
+  const lineGeometry = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(0, 0, 0),
+    new THREE.Vector3(1.5, -1.5, 0)
+  ]);
+  const lineMaterial = new THREE.LineBasicMaterial({ color: 0xFFFFFF });
+  const line = new THREE.Line(lineGeometry, lineMaterial);
+  line.position.set(rod.position.x + 0.8, rod.position.y, rod.position.z);
+  rodGroup.add(line);
+  
+  // Create hook
+  const hookGeometry = new THREE.TorusGeometry(0.05, 0.01, 8, 12, Math.PI);
+  const hookMaterial = new THREE.MeshStandardMaterial({ color: 0xCCCCCC });
+  const hook = new THREE.Mesh(hookGeometry, hookMaterial);
+  hook.position.set(line.position.x + 1.5, line.position.y - 1.5, line.position.z);
+  hook.rotation.x = Math.PI / 2;
+  rodGroup.add(hook);
+  
+  // Position the rod relative to the bird
+  rodGroup.position.set(0.3, 0.3, 0.5); // Slightly to the side and in front
+  
+  // Add to bird container
+  birdContainer.add(rodGroup);
+  
+  return rodGroup;
+}
+
+// Update the openFishingGame function to show the rod in the main scene
+export function openFishingGame(movementState, switchBirdModel, birdContainer, scene) {
+  // Make sure to hide the interaction prompt
+  hideInteractionPrompt();
+  
   // Prevent player movement while fishing
   fishingGameState.previousMovementState = { ...movementState.bird };
   movementState.bird.forward = false;
@@ -177,6 +218,9 @@ export function openFishingGame(movementState, switchBirdModel) {
   
   // Switch to still model
   switchBirdModel(false);
+  
+  // Add a fishing rod to the main scene (attached to the bird)
+  fishingGameState.mainSceneRod = createMainSceneFishingRod(scene, birdContainer);
   
   // Create fishing game UI
   const fishingGameUI = document.createElement('div');
@@ -217,7 +261,7 @@ export function openFishingGame(movementState, switchBirdModel) {
   closeButton.style.fontSize = '24px';
   closeButton.style.cursor = 'pointer';
   closeButton.style.padding = '5px 10px';
-  closeButton.onclick = () => closeFishingGame(movementState);
+  closeButton.onclick = () => closeFishingGame(movementState, birdContainer);
   
   header.appendChild(title);
   header.appendChild(closeButton);
@@ -330,8 +374,20 @@ export function openFishingGame(movementState, switchBirdModel) {
   hideInteractionPrompt();
 }
 
-// Close the fishing game
-export function closeFishingGame(movementState) {
+// Update the closeFishingGame function to remove the rod
+export function closeFishingGame(movementState, birdContainer) {
+  // Remove fishing rod from main scene
+  if (fishingGameState.mainSceneRod && birdContainer) {
+    birdContainer.remove(fishingGameState.mainSceneRod);
+    fishingGameState.mainSceneRod = null;
+  }
+  
+  // Remove casting indicator if it exists
+  const castingIndicator = document.getElementById('casting-indicator');
+  if (castingIndicator && castingIndicator.parentNode) {
+    castingIndicator.parentNode.removeChild(castingIndicator);
+  }
+  
   // Clear any active timeouts
   if (fishingGameState.castingTimeout) {
     clearTimeout(fishingGameState.castingTimeout);
@@ -361,11 +417,131 @@ export function closeFishingGame(movementState) {
   }
 }
 
-// Cast the fishing line
+// Update the castFishingLine function to add a casting indicator
 export function castFishingLine() {
+  // First check if there's a fish caught notification and close it
+  const fishCaughtNotification = document.getElementById('fish-caught-notification');
+  if (fishCaughtNotification) {
+    if (fishCaughtNotification.parentNode) {
+      fishCaughtNotification.parentNode.removeChild(fishCaughtNotification);
+    }
+    // If we were just viewing a caught fish, start casting again
+    startCastingProcess();
+    return;
+  }
+  
+  // Otherwise, continue with regular casting process
   if (!fishingGameState.isFishing || fishingGameState.isCasting) return;
   
+  startCastingProcess();
+}
+
+// Extract the main casting process to a separate function so it can be reused
+function startCastingProcess() {
   console.log('Casting fishing line');
+  
+  // Hide the fishing game interface while casting
+  const fishingGameUI = document.getElementById('fishing-game');
+  if (fishingGameUI) {
+    fishingGameUI.style.display = 'none';
+  }
+  
+  // Create and show casting indicator
+  const castingIndicator = document.createElement('div');
+  castingIndicator.id = 'casting-indicator';
+  castingIndicator.style.position = 'fixed';
+  castingIndicator.style.top = '50%';
+  castingIndicator.style.left = '50%';
+  castingIndicator.style.transform = 'translate(-50%, -50%)';
+  castingIndicator.style.width = '400px';
+  castingIndicator.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+  castingIndicator.style.color = 'white';
+  castingIndicator.style.padding = '30px';
+  castingIndicator.style.borderRadius = '15px';
+  castingIndicator.style.textAlign = 'center';
+  castingIndicator.style.zIndex = '10000';
+  castingIndicator.style.boxShadow = '0 0 30px rgba(0, 0, 0, 0.5)';
+  
+  // Add the title
+  const castingTitle = document.createElement('h2');
+  castingTitle.textContent = 'Casting Line...';
+  castingTitle.style.margin = '0 0 20px 0';
+  castingTitle.style.fontSize = '28px';
+  castingTitle.style.color = '#4CAF50';
+  castingIndicator.appendChild(castingTitle);
+  
+  // Add animated dots container
+  const dotsContainer = document.createElement('div');
+  dotsContainer.id = 'casting-dots';
+  dotsContainer.style.fontSize = '50px';
+  dotsContainer.style.fontFamily = 'monospace';
+  dotsContainer.style.letterSpacing = '5px';
+  dotsContainer.style.margin = '20px 0';
+  dotsContainer.textContent = '.';
+  castingIndicator.appendChild(dotsContainer);
+  
+  // Add a message about waiting
+  const waitMessage = document.createElement('p');
+  waitMessage.textContent = 'Waiting for fish to bite...';
+  waitMessage.style.margin = '20px 0 0 0';
+  waitMessage.style.color = '#DDD';
+  waitMessage.style.fontSize = '18px';
+  castingIndicator.appendChild(waitMessage);
+  
+  // Add a small animation of a fishing hook
+  const hookAnim = document.createElement('div');
+  hookAnim.style.width = '100px';
+  hookAnim.style.height = '100px';
+  hookAnim.style.margin = '20px auto';
+  hookAnim.style.backgroundImage = 'url("/assets/fishing_hook.png")';
+  hookAnim.style.backgroundSize = 'contain';
+  hookAnim.style.backgroundPosition = 'center';
+  hookAnim.style.backgroundRepeat = 'no-repeat';
+  hookAnim.style.animation = 'bob 2s infinite ease-in-out';
+  
+  // Add the animation keyframes if they don't already exist
+  if (!document.getElementById('fishing-animations')) {
+    const style = document.createElement('style');
+    style.id = 'fishing-animations';
+    style.innerHTML = `
+      @keyframes bob {
+        0% { transform: translateY(0px); }
+        50% { transform: translateY(15px); }
+        100% { transform: translateY(0px); }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+  
+  // Use a fish icon if the hook image isn't available
+  hookAnim.onerror = () => {
+    hookAnim.innerHTML = '🎣';
+    hookAnim.style.fontSize = '50px';
+    hookAnim.style.textAlign = 'center';
+    hookAnim.style.lineHeight = '100px';
+  };
+  
+  castingIndicator.appendChild(hookAnim);
+  
+  // Add to the document body
+  document.body.appendChild(castingIndicator);
+  
+  // Start dot animation
+  let dotCount = 0;
+  const animateDots = () => {
+    if (!fishingGameState.isCasting) return;
+    
+    dotCount = (dotCount + 1) % 4;
+    const dots = '.'.repeat(dotCount || 1);
+    const dotsElem = document.getElementById('casting-dots');
+    if (dotsElem) {
+      dotsElem.textContent = dots;
+    }
+    
+    setTimeout(animateDots, 500);
+  };
+  
+  animateDots();
   
   // Set casting state
   fishingGameState.isCasting = true;
@@ -380,32 +556,6 @@ export function castFishingLine() {
       catchFish();
     }
   }, 10000); // 10 seconds timeout
-  
-  // Disable cast button during casting
-  const castButton = document.querySelector('#fishing-game button');
-  if (castButton) {
-    castButton.disabled = true;
-    castButton.style.backgroundColor = '#999';
-  }
-  
-  // Show casting message
-  const gameArea = document.getElementById('fishing-game-area');
-  const castingMessage = document.createElement('div');
-  castingMessage.id = 'casting-message';
-  castingMessage.textContent = 'Casting...';
-  castingMessage.style.position = 'absolute';
-  castingMessage.style.top = '20px';
-  castingMessage.style.left = '50%';
-  castingMessage.style.transform = 'translateX(-50%)';
-  castingMessage.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
-  castingMessage.style.color = 'white';
-  castingMessage.style.padding = '10px 20px';
-  castingMessage.style.borderRadius = '5px';
-  castingMessage.style.zIndex = '10';
-  
-  if (gameArea) {
-    gameArea.appendChild(castingMessage);
-  }
   
   // Start casting animation
   startCastingAnimation();
@@ -583,12 +733,220 @@ function handleCastingAnimation() {
   }
 }
 
-// Catch a fish based on probabilities
+// Replace the showFishCaughtNotification function with this version
+function showFishCaughtNotification(fish) {
+  // Create notification
+  const notification = document.createElement('div');
+  notification.id = 'fish-caught-notification';
+  notification.style.position = 'fixed';
+  notification.style.top = '50%';
+  notification.style.left = '50%';
+  notification.style.transform = 'translate(-50%, -50%)';
+  notification.style.width = '700px';
+  notification.style.backgroundColor = 'rgba(0, 0, 0, 0.85)';
+  notification.style.color = 'white';
+  notification.style.padding = '20px';
+  notification.style.borderRadius = '10px';
+  notification.style.textAlign = 'center';
+  notification.style.zIndex = '10000';
+  notification.style.boxShadow = '0 0 20px rgba(0, 0, 0, 0.5)';
+  
+  // Add header
+  const header = document.createElement('h2');
+  header.textContent = 'You caught a fish!';
+  header.style.margin = '0 0 15px 0';
+  header.style.color = '#4CAF50';
+  notification.appendChild(header);
+  
+  // Add fish name and length
+  const fishName = document.createElement('h1');
+  fishName.textContent = `${fish.name} (${fish.actualLength}cm)`;
+  fishName.style.margin = '0 0 20px 0';
+  fishName.style.color = '#FFFFFF';
+  notification.appendChild(fishName);
+  
+  // Create container for image and details
+  const contentContainer = document.createElement('div');
+  contentContainer.style.display = 'flex';
+  contentContainer.style.justifyContent = 'space-between';
+  contentContainer.style.marginBottom = '20px';
+  
+  // Create image container
+  const imageContainer = document.createElement('div');
+  imageContainer.style.flex = '1';
+  imageContainer.style.padding = '10px';
+  
+  // Add fish image
+  const imagePath = fish.image.replace(/^\/public/, '');
+  const fishImage = document.createElement('img');
+  fishImage.src = imagePath;
+  fishImage.alt = fish.name;
+  fishImage.style.maxWidth = '250px';
+  fishImage.style.maxHeight = '200px';
+  fishImage.style.border = '3px solid #4CAF50';
+  fishImage.style.borderRadius = '5px';
+  
+  // Handle image load error
+  fishImage.onerror = () => {
+    console.error(`Failed to load fish image: ${imagePath}`);
+    fishImage.src = '/assets/fish/default_fish.jpg';
+    fishImage.alt = 'Fish image not available';
+  };
+  
+  imageContainer.appendChild(fishImage);
+  
+  // Create details container
+  const detailsContainer = document.createElement('div');
+  detailsContainer.style.flex = '1';
+  detailsContainer.style.padding = '10px';
+  detailsContainer.style.textAlign = 'left';
+  
+  // Add fish details
+  const detailsList = document.createElement('ul');
+  detailsList.style.listStyleType = 'none';
+  detailsList.style.padding = '0';
+  
+  // Length detail
+  const lengthItem = document.createElement('li');
+  lengthItem.style.padding = '8px 0';
+  lengthItem.style.borderBottom = '1px solid rgba(255, 255, 255, 0.2)';
+  
+  // Determine if this is a particularly good catch
+  const minSize = parseInt(fish.size.min);
+  const maxSize = parseInt(fish.size.max);
+  const range = maxSize - minSize;
+  const percentOfMax = ((fish.actualLength - minSize) / range) * 100;
+  
+  let lengthQuality = '';
+  if (percentOfMax > 90) {
+    lengthQuality = ' <span style="color: gold; font-weight: bold;">(Trophy Size!)</span>';
+  } else if (percentOfMax > 75) {
+    lengthQuality = ' <span style="color: #4CAF50; font-weight: bold;">(Large Catch!)</span>';
+  } else if (percentOfMax > 50) {
+    lengthQuality = ' <span style="color: #3498db;">(Good Size)</span>';
+  }
+  
+  lengthItem.innerHTML = `<strong>Length:</strong> ${fish.actualLength}cm${lengthQuality}`;
+  detailsList.appendChild(lengthItem);
+  
+  // Size range detail
+  const sizeRangeItem = document.createElement('li');
+  sizeRangeItem.style.padding = '8px 0';
+  sizeRangeItem.style.borderBottom = '1px solid rgba(255, 255, 255, 0.2)';
+  sizeRangeItem.innerHTML = `<strong>Typical Size Range:</strong> ${fish.size.min} - ${fish.size.max}`;
+  detailsList.appendChild(sizeRangeItem);
+  
+  // Rarity detail
+  const rarityItem = document.createElement('li');
+  rarityItem.style.padding = '8px 0';
+  rarityItem.style.borderBottom = '1px solid rgba(255, 255, 255, 0.2)';
+  rarityItem.innerHTML = `<strong>Rarity:</strong> ${(fish.probability * 100).toFixed(0)}% chance`;
+  detailsList.appendChild(rarityItem);
+  
+  // Count in inventory
+  const countItem = document.createElement('li');
+  countItem.style.padding = '8px 0';
+  countItem.style.borderBottom = '1px solid rgba(255, 255, 255, 0.2)';
+  const inventory = fishingGameState.playerInventory[fish.name] || { count: 0 };
+  countItem.innerHTML = `<strong>In Inventory:</strong> ${inventory.count}`;
+  detailsList.appendChild(countItem);
+  
+  // Personal best
+  if (inventory.catches && inventory.catches.length > 0) {
+    // Find the longest fish caught
+    const personalBest = Math.max(...inventory.catches.map(c => c.length));
+    
+    const bestItem = document.createElement('li');
+    bestItem.style.padding = '8px 0';
+    bestItem.style.borderBottom = '1px solid rgba(255, 255, 255, 0.2)';
+    
+    if (fish.actualLength >= personalBest) {
+      bestItem.innerHTML = `<strong>Personal Best:</strong> ${fish.actualLength}cm <span style="color: gold;">(New Record!)</span>`;
+    } else {
+      bestItem.innerHTML = `<strong>Personal Best:</strong> ${personalBest}cm`;
+    }
+    
+    detailsList.appendChild(bestItem);
+  }
+  
+  detailsContainer.appendChild(detailsList);
+  
+  // Add containers to content container
+  contentContainer.appendChild(imageContainer);
+  contentContainer.appendChild(detailsContainer);
+  
+  // Add content container to notification
+  notification.appendChild(contentContainer);
+  
+  // Add cast button
+  const castButton = document.createElement('button');
+  castButton.textContent = 'Cast Line Again';
+  castButton.style.backgroundColor = '#4CAF50';
+  castButton.style.color = 'white';
+  castButton.style.border = 'none';
+  castButton.style.padding = '12px 24px';
+  castButton.style.borderRadius = '4px';
+  castButton.style.marginTop = '15px';
+  castButton.style.cursor = 'pointer';
+  castButton.style.fontSize = '16px';
+  
+  // When cast button is clicked, hide this notification and restart casting
+  castButton.onclick = () => {
+    // Remove the notification
+    if (notification.parentNode) {
+      notification.parentNode.removeChild(notification);
+    }
+    
+    // Start casting again
+    startCastingProcess();
+  };
+  notification.appendChild(castButton);
+  
+  // Add a return to menu button
+  const menuButton = document.createElement('button');
+  menuButton.textContent = 'Return to Menu';
+  menuButton.style.backgroundColor = '#3498db';
+  menuButton.style.color = 'white';
+  menuButton.style.border = 'none';
+  menuButton.style.padding = '12px 24px';
+  menuButton.style.borderRadius = '4px';
+  menuButton.style.marginTop = '15px';
+  menuButton.style.marginLeft = '10px';
+  menuButton.style.cursor = 'pointer';
+  menuButton.style.fontSize = '16px';
+  
+  // When menu button is clicked, show the fishing game interface again
+  menuButton.onclick = () => {
+    // Remove the notification
+    if (notification.parentNode) {
+      notification.parentNode.removeChild(notification);
+    }
+    
+    // Show the fishing game interface
+    const fishingGameUI = document.getElementById('fishing-game');
+    if (fishingGameUI) {
+      fishingGameUI.style.display = 'flex';
+    }
+  };
+  
+  notification.appendChild(menuButton);
+  
+  // Add to the document body
+  document.body.appendChild(notification);
+}
+
+// Update the catchFish function to remove the casting indicator
 function catchFish() {
   // Clear the safety timeout
   if (fishingGameState.castingTimeout) {
     clearTimeout(fishingGameState.castingTimeout);
     fishingGameState.castingTimeout = null;
+  }
+  
+  // Remove casting indicator if it exists
+  const castingIndicator = document.getElementById('casting-indicator');
+  if (castingIndicator && castingIndicator.parentNode) {
+    castingIndicator.parentNode.removeChild(castingIndicator);
   }
   
   // Determine which fish is caught
@@ -612,50 +970,75 @@ function catchFish() {
     }; // Fallback just in case
   }
   
-  console.log('Caught fish:', caughtFish.name);
+  // Calculate fish length based on size range and weighted probabilities
+  caughtFish.actualLength = calculateFishLength(caughtFish);
   
-  // Update casting message
-  const castingMessage = document.getElementById('casting-message');
-  if (castingMessage) {
-    castingMessage.textContent = `You caught a ${caughtFish.name}!`;
-    castingMessage.style.backgroundColor = 'rgba(76, 175, 80, 0.8)'; // Green background
-  }
+  console.log('Caught fish:', caughtFish.name, `(${caughtFish.actualLength}cm)`);
   
   // Add to inventory
-  addToInventory(caughtFish.name);
+  addToInventory(caughtFish.name, caughtFish.actualLength);
   
-  // Show caught fish
+  // Show caught fish in 3D scene
   showCaughtFish(caughtFish);
   
-  // Reset casting after a delay
-  setTimeout(() => {
-    fishingGameState.isCasting = false;
-    
-    // Remove casting message
-    if (castingMessage) {
-      castingMessage.parentNode.removeChild(castingMessage);
-    }
-    
-    // Re-enable cast button
-    const castButton = document.querySelector('#fishing-game button');
-    if (castButton) {
-      castButton.disabled = false;
-      castButton.style.backgroundColor = '#4CAF50';
-    }
-  }, 3000);
+  // Show notification with the caught fish
+  showFishCaughtNotification(caughtFish);
+  
+  // Reset casting state
+  fishingGameState.isCasting = false;
+  
+  // Re-enable cast button in the main interface (for when it's shown again)
+  const castButton = document.querySelector('#fishing-game button');
+  if (castButton) {
+    castButton.disabled = false;
+    castButton.style.backgroundColor = '#4CAF50';
+  }
 }
 
-// Add to player's inventory
-function addToInventory(fishName) {
-  console.log('Adding to inventory:', fishName);
+// Add this new function to calculate a random fish length with weighted probabilities
+function calculateFishLength(fish) {
+  const minSize = parseInt(fish.size.min);
+  const maxSize = parseInt(fish.size.max);
+  const range = maxSize - minSize;
   
-  // Initialize the fish count if it doesn't exist
+  // Calculate size thresholds - 80% chance for smaller sizes, 20% for larger sizes
+  const lowerThreshold = minSize + Math.floor(range * 0.6); // 60% of range
+  
+  // Determine if this fish is in the common or rare size group
+  const isCommonSize = Math.random() < 0.8; // 80% chance for common sizes
+  
+  let length;
+  if (isCommonSize) {
+    // Common size range (min to lowerThreshold)
+    length = minSize + Math.floor(Math.random() * (lowerThreshold - minSize + 1));
+  } else {
+    // Rare size range (lowerThreshold to max)
+    length = lowerThreshold + Math.floor(Math.random() * (maxSize - lowerThreshold + 1));
+  }
+  
+  return length;
+}
+
+// Update the addToInventory function to track fish sizes
+function addToInventory(fishName, fishLength) {
+  console.log('Adding to inventory:', fishName, `(${fishLength}cm)`);
+  
+  // Initialize the fish entry if it doesn't exist
   if (!fishingGameState.playerInventory[fishName]) {
-    fishingGameState.playerInventory[fishName] = 0;
+    fishingGameState.playerInventory[fishName] = {
+      count: 0,
+      catches: []
+    };
   }
   
   // Increment the count
-  fishingGameState.playerInventory[fishName]++;
+  fishingGameState.playerInventory[fishName].count++;
+  
+  // Add this catch with its length
+  fishingGameState.playerInventory[fishName].catches.push({
+    length: fishLength,
+    timestamp: Date.now()
+  });
   
   console.log('Updated inventory:', fishingGameState.playerInventory);
 }

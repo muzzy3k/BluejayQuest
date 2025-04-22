@@ -702,7 +702,7 @@ const movementState = {
     backward: false,
     left: false,   // will rotate the map (and thus the camera) slowly
     right: false,
-    speed: 0.1,
+    speed: 0.08,
     rotationSpeed: 0.05, // in radians per frame; will be halved for smoother map rotation
     isMoving: false // New flag to track if the bird is currently in motion
   }
@@ -1109,16 +1109,17 @@ window.addEventListener('keydown', (event) => {
     case 'f':
     case 'F':
       if (fishingGameState.isNearFishingSpot && !fishingGameState.isFishing) {
-        openFishingGame(movementState, switchBirdModel);
+        // Pass birdContainer and scene as additional parameters
+        openFishingGame(movementState, switchBirdModel, birdContainer, scene);
       }
       else if (fishingGameState.isFishing) {
-        // Call the casting function
         castFishingLine();
       }
       break;
     case 'Escape':
       if (fishingGameState.isFishing) {
-        closeFishingGame(movementState);
+        // Pass birdContainer as additional parameter
+        closeFishingGame(movementState, birdContainer);
       }
       break;
   }
