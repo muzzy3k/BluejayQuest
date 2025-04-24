@@ -1,10 +1,11 @@
 import * as THREE from 'three';
 import mapboxgl from 'mapbox-gl';
 import { MAPBOX_ACCESS_TOKEN } from './config.js';
-import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { createLoginScreen, checkUserLoggedIn } from './loginScreen.js'
 import { getCurrentUser, signOut } from './auth.js'
 import { createCachedFBXLoader, registerServiceWorker } from './modelCache.js';
+import { initializeInventoryDatabase } from './api/fishInventory.js';
+
 import { 
   addFishingSign, 
   checkFishingSpotProximity, 
@@ -28,9 +29,47 @@ import {
       const loginScreen = createLoginScreen()
       document.body.appendChild(loginScreen)
       
-      // Exit early, don't load the game yet
-      return
+      // Wait for auth state to change (i.e., user logs in)
+      await new Promise(resolve => {
+        const checkAuth = async () => {
+          const loggedIn = await checkUserLoggedIn();
+          if (loggedIn) {
+            document.body.removeChild(loginScreen);
+            resolve();
+          } else {
+            setTimeout(checkAuth, 1000); // Check again in 1 second
+          }
+        };
+        checkAuth();
+      });
     }
+    
+    // Initialize database connection after user is authenticated
+    await initializeInventoryDatabase();
+    
+    // Create loading screen for later use
+    const loadingScreen = document.createElement('div');
+    loadingScreen.id = 'loading-screen';
+    loadingScreen.style.position = 'fixed';
+    loadingScreen.style.top = '0';
+    loadingScreen.style.left = '0';
+    loadingScreen.style.width = '100%';
+    loadingScreen.style.height = '100%';
+    loadingScreen.style.backgroundColor = '#333';
+    loadingScreen.style.display = 'flex';
+    loadingScreen.style.flexDirection = 'column';
+    loadingScreen.style.justifyContent = 'center';
+    loadingScreen.style.alignItems = 'center';
+    loadingScreen.style.zIndex = '9999';
+    loadingScreen.style.display = 'none'; // Hide initially
+
+    const loadingText = document.createElement('h1');
+    loadingText.style.color = 'white';
+    loadingText.style.fontFamily = 'sans-serif';
+    loadingText.textContent = 'Loading...';
+    loadingScreen.appendChild(loadingText);
+
+    document.body.appendChild(loadingScreen);
     
     // User is logged in, get their details
     const user = await getCurrentUser()
@@ -400,7 +439,8 @@ function createControlsPanel() {
     { key: '←/→', action: 'Turn left/right' },
     { key: 'Mouse Wheel', action: 'Zoom in/out' },
     { key: 'Q', action: 'Look up' },
-    { key: 'E', action: 'Look down' }
+    { key: 'E', action: 'Look down' },
+    { key: 'I', action: 'Open inventory' }
   ];
   
   controls.forEach(control => {
@@ -530,7 +570,7 @@ function createControlsPanel() {
 }
 
   // Move existing map initialization and other setup into a function
-  function initializeGame(characterType) {
+  async function initializeGame(characterType) {
     // Optionally disable telemetry to avoid POST errors
     if (mapboxgl.setTelemetryEnabled) {
       mapboxgl.setTelemetryEnabled(false);
@@ -1116,6 +1156,13 @@ window.addEventListener('keydown', (event) => {
         castFishingLine();
       }
       break;
+    case 'i':
+      case 'I':
+        // Open inventory on 'I' key press
+        import('./api/fishInventoryUI.js').then(module => {
+          module.showInventoryUI();
+        });
+        break;
     case 'Escape':
       if (fishingGameState.isFishing) {
         // Pass birdContainer as additional parameter

@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { getCurrentUser } from './auth.js';
+import { addFishToDatabase, getUserFishInventory } from './api/fishInventory.js';
 
 // Game state to track fishing activity
 export const fishingGameState = {
@@ -847,14 +849,14 @@ function showFishCaughtNotification(fish) {
   const countItem = document.createElement('li');
   countItem.style.padding = '8px 0';
   countItem.style.borderBottom = '1px solid rgba(255, 255, 255, 0.2)';
-  const inventory = fishingGameState.playerInventory[fish.name] || { count: 0 };
+  const inventory = fishingGameState.playerInventory[fish.name] || { count: 0, catches: [] };
   countItem.innerHTML = `<strong>In Inventory:</strong> ${inventory.count}`;
   detailsList.appendChild(countItem);
   
   // Personal best
   if (inventory.catches && inventory.catches.length > 0) {
     // Find the longest fish caught
-    const personalBest = Math.max(...inventory.catches.map(c => c.length));
+    const personalBest = Math.max(...inventory.catches.map(c => typeof c.length === 'number' ? c.length : parseFloat(c.length)));
     
     const bestItem = document.createElement('li');
     bestItem.style.padding = '8px 0';
@@ -1020,27 +1022,58 @@ function calculateFishLength(fish) {
 }
 
 // Update the addToInventory function to track fish sizes
-function addToInventory(fishName, fishLength) {
+async function addToInventory(fishName, fishLength) {
   console.log('Adding to inventory:', fishName, `(${fishLength}cm)`);
   
-  // Initialize the fish entry if it doesn't exist
-  if (!fishingGameState.playerInventory[fishName]) {
-    fishingGameState.playerInventory[fishName] = {
-      count: 0,
-      catches: []
-    };
+  // Get current user
+  const user = await getCurrentUser();
+  
+  if (!user) {
+    console.error('Cannot add fish to inventory: User not logged in');
+    // Still maintain local inventory for offline/guest mode
+    if (!fishingGameState.playerInventory[fishName]) {
+      fishingGameState.playerInventory[fishName] = {
+        count: 0,
+        catches: []
+      };
+    }
+    
+    fishingGameState.playerInventory[fishName].count++;
+    fishingGameState.playerInventory[fishName].catches.push({
+      length: fishLength,
+      timestamp: Date.now()
+    });
+    
+    return;
   }
   
-  // Increment the count
-  fishingGameState.playerInventory[fishName].count++;
+  // Add to database
+  const result = await addFishToDatabase(user.id, fishName, fishLength);
   
-  // Add this catch with its length
-  fishingGameState.playerInventory[fishName].catches.push({
-    length: fishLength,
-    timestamp: Date.now()
-  });
-  
-  console.log('Updated inventory:', fishingGameState.playerInventory);
+  if (!result.success) {
+    console.error('Error adding fish to database:', result.error);
+    // Fall back to local storage
+    if (!fishingGameState.playerInventory[fishName]) {
+      fishingGameState.playerInventory[fishName] = {
+        count: 0,
+        catches: []
+      };
+    }
+    
+    fishingGameState.playerInventory[fishName].count++;
+    fishingGameState.playerInventory[fishName].catches.push({
+      length: fishLength,
+      timestamp: Date.now()
+    });
+  } else {
+    console.log('Fish added to database successfully');
+    
+    // Update local cache from database for immediate UI updates
+    const inventoryResult = await getUserFishInventory(user.id);
+    if (inventoryResult.success) {
+      fishingGameState.playerInventory = inventoryResult.inventory;
+    }
+  }
 }
 
 // Show the caught fish in the scene
