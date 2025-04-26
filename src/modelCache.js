@@ -57,8 +57,13 @@ export function createCachedFBXLoader() {
 }
 
 // Store recently used models in user profile for optimization
+// Update modelCache.js to handle missing profiles table
 async function storeUsedModelInProfile(modelPath) {
   try {
+    // Skip profile storage - table doesn't exist yet
+    return;
+    
+    /* Original code - commented out
     const { data: { user } } = await supabase.auth.getUser();
     
     if (!user) return;
@@ -88,13 +93,18 @@ async function storeUsedModelInProfile(modelPath) {
           updated_at: new Date()
         });
     }
+    */
   } catch (error) {
     console.error('Failed to update user model history:', error);
   }
 }
 
-// Register service worker for model caching
+// Update modelCache.js to disable service worker registration
 export function registerServiceWorker() {
+  // Disabled for now - uncomment when sw.js is properly set up
+  console.log('Service worker registration disabled');
+  
+  /* Original code - commented out
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
       navigator.serviceWorker.register('/sw.js')
@@ -106,6 +116,7 @@ export function registerServiceWorker() {
         });
     });
   }
+  */
 }
 
 const CACHE_NAME = 'bluejay-quest-v1';

@@ -6,8 +6,7 @@ import { getCurrentUser, signOut } from './auth.js'
 import { createCachedFBXLoader, registerServiceWorker } from './modelCache.js';
 import { initializeInventoryDatabase } from './api/fishInventory.js';
 
-import { 
-  addFishingSign, 
+import {
   checkFishingSpotProximity, 
   fishingGameState,
   openFishingGame,
@@ -663,11 +662,16 @@ styleOptions.forEach(style => {
   link.className = 'style-option';
   link.onclick = (e) => {
     e.preventDefault();
-    map.setStyle('mapbox://styles/mapbox/' + style.id);a
+    map.setStyle('mapbox://styles/mapbox/' + style.id);
     
     // Listen for the style to finish loading, then re-add 3D features
     map.once('style.load', () => {
-      setupTerrainAndBuildings();
+      console.log('Map style loaded');
+      
+      // Add a delay before setting up terrain to ensure the style is fully loaded
+      setTimeout(() => {
+        setupTerrainAndBuildings();
+      }, 500);
     });
   };
   layerList.appendChild(link);
@@ -851,7 +855,9 @@ fbxLoader.load(modelPaths.standing, (fbx) => {
   // Update loading tracker
   modelsLoaded++;
   if (modelsLoaded === totalModelsToLoad) {
-    document.body.removeChild(loadingScreen);
+    if (loadingScreen && loadingScreen.parentNode) {
+      loadingScreen.parentNode.removeChild(loadingScreen);
+    }
     createControlsPanel();
   }
   
@@ -871,7 +877,9 @@ fbxLoader.load(modelPaths.standing, (fbx) => {
 
   modelsLoaded++;
   if (modelsLoaded === totalModelsToLoad) {
-    document.body.removeChild(loadingScreen);
+    if (loadingScreen && loadingScreen.parentNode) {
+      loadingScreen.parentNode.removeChild(loadingScreen);
+    }
   }
 });
 
@@ -973,7 +981,9 @@ fbxLoader.load(modelPaths.walking, (fbx) => {
   // Update loading tracker
   modelsLoaded++;
   if (modelsLoaded === totalModelsToLoad) {
-    document.body.removeChild(loadingScreen);
+    if (loadingScreen && loadingScreen.parentNode) {
+      loadingScreen.parentNode.removeChild(loadingScreen);
+    }
     createControlsPanel();
   }
   
@@ -989,7 +999,9 @@ fbxLoader.load(modelPaths.walking, (fbx) => {
   // Still remove loading screen in case of error
   modelsLoaded++;
   if (modelsLoaded === totalModelsToLoad) {
-    document.body.removeChild(loadingScreen);
+    if (loadingScreen && loadingScreen.parentNode) {
+      loadingScreen.parentNode.removeChild(loadingScreen);
+    }
   }
 });
 
@@ -1006,7 +1018,9 @@ function updateLoadingStatus(status, element) {
     
     // Remove loading screen after showing this info briefly
     setTimeout(() => {
-      document.body.removeChild(loadingScreen);
+      if (loadingScreen && loadingScreen.parentNode) {
+        loadingScreen.parentNode.removeChild(loadingScreen);
+      }
       createControlsPanel();
     }, 2000);
   }
@@ -1338,124 +1352,131 @@ window.addEventListener('resize', () => {
 function setupTerrainAndBuildings() {
   console.log('Setting up terrain and buildings');
 
-  // Add 3D terrain if it doesn't exist
-  if (!map.getSource('mapbox-dem')) {
-    map.addSource('mapbox-dem', {
-      type: 'raster-dem',
-      url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
-      tileSize: 512,
-      maxzoom: 16
-    });
-    map.setTerrain({ source: 'mapbox-dem', exaggeration: 1.5 });
-  }
-
-  // Find the first symbol layer for proper placement
-  const layers = map.getStyle().layers;
-  const labelLayerId = layers.find(
-    (layer) => layer.type === 'symbol' && layer.layout && layer.layout['text-field']
-  )?.id;
-
-  // Remove existing 3D buildings layer if it exists
-  if (map.getLayer('3d-buildings')) {
-    map.removeLayer('3d-buildings');
-  }
-
-  // Add enhanced 3D buildings layer
-  map.addLayer({
-    id: '3d-buildings',
-    source: 'composite',
-    'source-layer': 'building',
-    'filter': ['==', 'extrude', 'true'],
-    type: 'fill-extrusion',
-    minzoom: 15,
-    paint: {
-      'fill-extrusion-color': [
-        'match',
-        ['get', 'type'],
-        'education', '#FF8C00',  // Keep your custom colors for different building types
-        'commercial', '#4682B4',
-        'residential', '#CD5C5C',
-        '#BEBEBE'
-      ],
-      'fill-extrusion-height': [
-        'interpolate', ['linear'], ['zoom'],
-        15, 0,
-        15.05, ['get', 'height'] // Use actual height from data
-      ],
-      'fill-extrusion-base': [
-        'interpolate', ['linear'], ['zoom'],
-        15, 0,
-        15.05, ['get', 'min_height']
-      ],
-      'fill-extrusion-opacity': 0.7
+  try {
+    // Try to set up terrain if needed
+    if (!map.getSource('mapbox-dem')) {
+      try {
+        map.addSource('mapbox-dem', {
+          type: 'raster-dem',
+          url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
+          tileSize: 512,
+          maxzoom: 14 // Lower maxzoom to avoid 404 errors
+        });
+        map.setTerrain({ source: 'mapbox-dem', exaggeration: 1.2 });
+      } catch (terrainError) {
+        console.warn('Could not add terrain source:', terrainError);
+        // Continue without terrain
+      }
     }
-  }, labelLayerId); // Add before labels for better visibility
-  
-  // OPTION 1: Use dataset directly via GeoJSON
-  if (!map.getSource('custom-building-data')) {
-    // Get data directly from the dataset
-    map.addSource('custom-building-data', {
-      type: 'geojson',
-      data: `https://api.mapbox.com/datasets/v1/islamm22/cm8oiqyhp5mne1omogra1iz8j/features?access_token=${mapboxgl.accessToken}`
-    });
-    
-    // Add markers for each point
-    map.addLayer({
-      id: 'building-points',
-      source: 'custom-building-data',
-      type: 'circle',
-      paint: {
-        'circle-radius': 6,
-        'circle-color': '#FF0000',
-        'circle-stroke-width': 2,
-        'circle-stroke-color': '#FFFFFF'
-      }
-    });
-    
-    // Add labels - note we're using property "0" as shown in your GeoJSON
-    map.addLayer({
-      id: 'building-labels',
-      source: 'custom-building-data',
-      type: 'symbol',
-      layout: {
-        'text-field': ['get', '0'], // Use the property name "0" from your GeoJSON
-        'text-font': ['Open Sans Semibold', 'Arial Unicode MS Bold'],
-        'text-size': 12,
-        'text-offset': [0, 1.5], // Offset below the point
-        'text-anchor': 'top',
-        'text-allow-overlap': false,
-        'text-max-width': 12
-      },
-      paint: {
-        'text-color': '#FFFFFF',
-        'text-halo-color': '#000000',
-        'text-halo-width': 2
-      }
-    });
-  }
-  
-  // Add a campus boundary polygon (if desired)
-  if (!map.getSource('campus-boundary')) {
-    map.addSource('campus-boundary', {
-      type: 'geojson',
-      data: {
-        type: 'Feature',
-        geometry: {
-          type: 'Polygon',
-          coordinates: [[
-            [-76.596720, 40.149641],
-            [-76.589503, 40.153440],
-            [-76.581853, 40.150569],
-            [-76.591676, 40.143198],
-            [-76.596720, 40.149641]
-          ]]
-        }
-      }
-    });
-  }
 
-  // Call the function to add the fishing sign
-  addFishingSign(scene, map, initialCenter);
+    // Find the first symbol layer for proper placement
+    const layers = map.getStyle().layers;
+    const labelLayerId = layers.find(
+      (layer) => layer.type === 'symbol' && layer.layout && layer.layout['text-field']
+    )?.id;
+
+    // Remove existing 3D buildings layer if it exists
+    if (map.getLayer('3d-buildings')) {
+      map.removeLayer('3d-buildings');
+    }
+
+    // Add enhanced 3D buildings layer
+    map.addLayer({
+      id: '3d-buildings',
+      source: 'composite',
+      'source-layer': 'building',
+      'filter': ['==', 'extrude', 'true'],
+      type: 'fill-extrusion',
+      minzoom: 15,
+      paint: {
+        'fill-extrusion-color': [
+          'match',
+          ['get', 'type'],
+          'education', '#FF8C00',  // Keep your custom colors for different building types
+          'commercial', '#4682B4',
+          'residential', '#CD5C5C',
+          '#BEBEBE'
+        ],
+        'fill-extrusion-height': [
+          'interpolate', ['linear'], ['zoom'],
+          15, 0,
+          15.05, ['get', 'height'] // Use actual height from data
+        ],
+        'fill-extrusion-base': [
+          'interpolate', ['linear'], ['zoom'],
+          15, 0,
+          15.05, ['get', 'min_height']
+        ],
+        'fill-extrusion-opacity': 0.85
+      }
+    }, labelLayerId); // Add before labels for better visibility
+    
+    // OPTION 1: Use dataset directly via GeoJSON
+    if (!map.getSource('custom-building-data')) {
+      // Get data directly from the dataset
+      map.addSource('custom-building-data', {
+        type: 'geojson',
+        data: `https://api.mapbox.com/datasets/v1/islamm22/cm8oiqyhp5mne1omogra1iz8j/features?access_token=${mapboxgl.accessToken}`
+      });
+      
+      // Add markers for each point
+      map.addLayer({
+        id: 'building-points',
+        source: 'custom-building-data',
+        type: 'circle',
+        paint: {
+          'circle-radius': 6,
+          'circle-color': '#FF0000',
+          'circle-stroke-width': 2,
+          'circle-stroke-color': '#FFFFFF'
+        }
+      });
+      
+      // Add labels - note we're using property "0" as shown in your GeoJSON
+      map.addLayer({
+        id: 'building-labels',
+        source: 'custom-building-data',
+        type: 'symbol',
+        layout: {
+          'text-field': ['get', '0'], // Use the property name "0" from your GeoJSON
+          'text-font': ['Open Sans Semibold', 'Arial Unicode MS Bold'],
+          'text-size': 12,
+          'text-offset': [0, 1.5], // Offset below the point
+          'text-anchor': 'top',
+          'text-allow-overlap': false,
+          'text-max-width': 12
+        },
+        paint: {
+          'text-color': '#FFFFFF',
+          'text-halo-color': '#000000',
+          'text-halo-width': 2
+        }
+      });
+    }
+    
+    // Add a campus boundary polygon (if desired)
+    if (!map.getSource('campus-boundary')) {
+      map.addSource('campus-boundary', {
+        type: 'geojson',
+        data: {
+          type: 'Feature',
+          geometry: {
+            type: 'Polygon',
+            coordinates: [[
+              [-76.596720, 40.149641],
+              [-76.589503, 40.153440],
+              [-76.581853, 40.150569],
+              [-76.591676, 40.143198],
+              [-76.596720, 40.149641]
+            ]]
+          }
+        }
+      });
+    }
+
+  } catch (error) {
+    console.error('Error in setupTerrainAndBuildings:', error);
+  }
 }
   
 // -----------------------------
@@ -1464,6 +1485,19 @@ function setupTerrainAndBuildings() {
 map.on('load', () => {
   console.log('Map loaded');
   setupTerrainAndBuildings();
+});
+
+// Replace the styleImageMissing event handler with this improved version:
+map.on('styleimagemissing', (e) => {
+  // First check if the image already exists to avoid duplicate error
+  if (!map.hasImage(e.id)) {
+    console.log(`Adding placeholder for missing image: ${e.id}`);
+    map.addImage(e.id, {
+      data: new Uint8Array(4).fill(0),
+      width: 1,
+      height: 1
+    });
+  }
 });
 
 }

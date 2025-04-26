@@ -55,53 +55,6 @@ export function coordsToPosition(coords, initialCenter) {
   );
 }
 
-// Add fishing sign to the scene
-export function addFishingSign(scene, map, initialCenter) {
-  // Define fishing spot coordinates
-  const fishingSpotCoords = [-76.590039, 40.152234];
-  
-  // Create a marker at the fishing spot location
-  const el = document.createElement('div');
-  el.className = 'fishing-marker';
-  el.style.backgroundColor = '#e74c3c';
-  el.style.width = '20px';
-  el.style.height = '20px';
-  el.style.borderRadius = '50%';
-  el.style.border = '2px solid white';
-  el.style.cursor = 'pointer';
-  
-  // Add the marker to the map
-  try {
-    const marker = new mapboxgl.Marker(el)
-      .setLngLat(fishingSpotCoords)
-      .setPopup(new mapboxgl.Popup().setHTML("<strong>Fishing Spot</strong><br>Press F to fish when nearby"))
-      .addTo(map);
-    
-    console.log('Fishing marker added at coordinates:', fishingSpotCoords);
-    
-    // Store reference to the fishing spot position
-    fishingGameState.fishingSign = {
-      marker: marker,
-      coordinates: fishingSpotCoords,
-      position: coordsToPosition(fishingSpotCoords, initialCenter),
-      interactionDistance: 10 // Reduced to 10 meters
-    };
-    
-    return marker;
-  } catch (error) {
-    console.error('Error adding fishing marker:', error);
-    
-    // Even if marker creation fails, still store the coordinates for interaction
-    fishingGameState.fishingSign = {
-      marker: null,
-      coordinates: fishingSpotCoords,
-      position: coordsToPosition(fishingSpotCoords, initialCenter),
-      interactionDistance: 10 // Reduced to 10 meters
-    };
-    
-    return null;
-  }
-}
 
 // Simplify the proximity check function
 export function checkFishingSpotProximity(birdContainer, map) {
