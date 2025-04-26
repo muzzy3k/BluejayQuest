@@ -1146,5 +1146,23 @@ function animateCaughtFish(fishGroup) {
   wiggle();
 }
 
+// Modified function that doesn't add a visible marker
+export function addFishingSign(scene, map, initialCenter) {
+  // Define fishing spot coordinates
+  const fishingSpotCoords = [-76.590039, 40.152234];
+  
+  // Just store the coordinates for interaction
+  fishingGameState.fishingSign = {
+    marker: null,
+    coordinates: fishingSpotCoords,
+    position: coordsToPosition(fishingSpotCoords, initialCenter),
+    interactionDistance: 10 // Distance in meters
+  };
+  
+  console.log('Fishing spot interaction zone defined at:', fishingSpotCoords);
+  
+  return null;
+}
+
 // That's all for the first file section
 // We'll continue with more functions in further steps 

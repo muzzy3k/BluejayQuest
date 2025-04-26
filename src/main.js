@@ -11,7 +11,8 @@ import {
   fishingGameState,
   openFishingGame,
   closeFishingGame,
-  castFishingLine
+  castFishingLine,
+  addFishingSign
 } from './fishingGame.js';
 
 "use strict";
@@ -1473,6 +1474,9 @@ function setupTerrainAndBuildings() {
         }
       });
     }
+
+    // Add fishing sign after map is loaded
+    addFishingSign(scene, map, initialCenter);
 
   } catch (error) {
     console.error('Error in setupTerrainAndBuildings:', error);
