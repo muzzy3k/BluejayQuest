@@ -8,7 +8,7 @@ BluejayQuest is an immersive 3D web-based exploration game where players can nav
 
 ### 3D Character Control
 
-- Navigate the map using keyboard controls (WASD)
+- Navigate the map using keyboard controls
 - Two different bird character models to choose from
 - Smooth animations between standing and walking states
 - Dynamic camera controls with zoom functionality
@@ -50,7 +50,7 @@ BluejayQuest is an immersive 3D web-based exploration game where players can nav
 ### Prerequisites
 
 - Node.js (v14 or higher)
-- NPM or Yarn package manager
+- NPM package manager
 - Mapbox account (free tier available)
 - Supabase account (free tier available)
 
@@ -59,7 +59,7 @@ BluejayQuest is an immersive 3D web-based exploration game where players can nav
 1. Clone the repository
 
    ```bash
-   git clone https://github.com/yourusername/BluejayQuest.git
+   git clone https://github.com/muzzy3k/BluejayQuest.git
    cd BluejayQuest
    ```
 
