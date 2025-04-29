@@ -978,7 +978,40 @@ function calculateFishLength(fish) {
 async function addToInventory(fishName, fishLength) {
   console.log('Adding to inventory:', fishName, `(${fishLength}cm)`);
   
-  // Get current user
+  // Check if in guest mode
+  const guestMode = localStorage.getItem('bluejayquest_guest_mode') === 'true';
+  
+  if (guestMode) {
+    // Use local storage for guest mode
+    import('./api/fishLocalStorage.js').then(module => {
+      const result = module.addFishToLocalStorage(fishName, fishLength);
+      
+      if (result.success) {
+        console.log('Fish added to local storage successfully');
+        
+        // Update local inventory
+        if (!fishingGameState.playerInventory[fishName]) {
+          fishingGameState.playerInventory[fishName] = {
+            count: 0,
+            catches: []
+          };
+        }
+        
+        fishingGameState.playerInventory[fishName].count++;
+        fishingGameState.playerInventory[fishName].catches.push({
+          id: result.data.id,
+          length: fishLength,
+          timestamp: new Date().toISOString()
+        });
+      } else {
+        console.error('Error adding fish to local storage:', result.error);
+      }
+    });
+    
+    return;
+  }
+  
+  // For regular users with login
   const user = await getCurrentUser();
   
   if (!user) {

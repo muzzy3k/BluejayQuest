@@ -1,10 +1,11 @@
 import * as THREE from 'three';
 import mapboxgl from 'mapbox-gl';
 import { MAPBOX_ACCESS_TOKEN } from './config.js';
-import { createLoginScreen, checkUserLoggedIn } from './loginScreen.js'
+import { createLoginScreen, checkUserLoggedIn, isGuestMode } from './loginScreen.js'
 import { getCurrentUser, signOut } from './auth.js'
 import { createCachedFBXLoader, registerServiceWorker } from './modelCache.js';
 import { initializeInventoryDatabase } from './api/fishInventory.js';
+import { initializeLocalInventory } from './api/fishLocalStorage.js';
 
 import {
   checkFishingSpotProximity, 
@@ -17,377 +18,470 @@ import {
 
 "use strict";
 
-(async function () {
+let initializeCharacterSelection; // Declare it at the top level
 
-    registerServiceWorker();
-
-    // Check if user is logged in
-    const isLoggedIn = await checkUserLoggedIn()
+// At the global scope, outside the IIFE
+function forceLogout() {
+  console.log('Force logout called');
   
-    if (!isLoggedIn) {
-      // Show login screen if not logged in
-      const loginScreen = createLoginScreen()
-      document.body.appendChild(loginScreen)
-      
-      // Wait for auth state to change (i.e., user logs in)
-      await new Promise(resolve => {
-        const checkAuth = async () => {
-          const loggedIn = await checkUserLoggedIn();
-          if (loggedIn) {
-            document.body.removeChild(loginScreen);
-            resolve();
-          } else {
-            setTimeout(checkAuth, 1000); // Check again in 1 second
-          }
-        };
-        checkAuth();
+  // Clear all relevant state
+  localStorage.removeItem('bluejayquest_guest_mode');
+  localStorage.removeItem('bluejayquest_auth_state');
+  
+  // Clear any session storage
+  sessionStorage.clear();
+  
+  // Remove any cached data
+  if (window.caches) {
+    caches.keys().then(keys => {
+      keys.forEach(key => {
+        if (key.includes('bluejayquest')) {
+          caches.delete(key);
+        }
       });
-    }
-    
-    // Initialize database connection after user is authenticated
-    await initializeInventoryDatabase();
-    
-    // Create loading screen for later use
-    const loadingScreen = document.createElement('div');
-    loadingScreen.id = 'loading-screen';
-    loadingScreen.style.position = 'fixed';
-    loadingScreen.style.top = '0';
-    loadingScreen.style.left = '0';
-    loadingScreen.style.width = '100%';
-    loadingScreen.style.height = '100%';
-    loadingScreen.style.backgroundColor = '#333';
-    loadingScreen.style.display = 'flex';
-    loadingScreen.style.flexDirection = 'column';
-    loadingScreen.style.justifyContent = 'center';
-    loadingScreen.style.alignItems = 'center';
-    loadingScreen.style.zIndex = '9999';
-    loadingScreen.style.display = 'none'; // Hide initially
-
-    const loadingText = document.createElement('h1');
-    loadingText.style.color = 'white';
-    loadingText.style.fontFamily = 'sans-serif';
-    loadingText.textContent = 'Loading...';
-    loadingScreen.appendChild(loadingText);
-
-    document.body.appendChild(loadingScreen);
-    
-    // User is logged in, get their details
-    const user = await getCurrentUser()
-    console.log('Logged in user:', user)
-
-
-  // Add a variable to track the selected character model
-  let selectedCharacter = '';
-  const modelSets = {
-    'original': {
-      standing: '/assets/Standing.fbx',
-      walking: '/assets/Walking.fbx'
-    },
-    'b': {
-      standing: '/assets/StandingB.fbx',
-      walking: '/assets/WalkingB.fbx'
-    }
-  };
-  
-  function addSignOutButton() {
-    const signOutBtn = document.createElement('button')
-    signOutBtn.textContent = 'Sign Out'
-    signOutBtn.style.position = 'fixed'
-    signOutBtn.style.bottom = '20px' // Changed from top to bottom
-    signOutBtn.style.right = '20px'
-    signOutBtn.style.zIndex = '10001'
-    signOutBtn.style.padding = '8px 12px'
-    signOutBtn.style.backgroundColor = '#e74c3c'
-    signOutBtn.style.color = 'white'
-    signOutBtn.style.border = 'none'
-    signOutBtn.style.borderRadius = '4px'
-    signOutBtn.style.cursor = 'pointer'
-    signOutBtn.style.boxShadow = '0 2px 5px rgba(0,0,0,0.2)' // Added shadow for better visibility
-    
-    signOutBtn.addEventListener('click', async () => {
-      const { success } = await signOut()
-      if (success) {
-        window.location.reload() // Reload to show login screen
-      }
-    })
-    
-    document.body.appendChild(signOutBtn)
+    });
   }
+  
+  // Force a hard reload with no cache
+  window.location.href = window.location.pathname + '?nocache=' + Date.now();
+}
 
-  // Create character selection screen
-  const characterSelectionScreen = document.createElement('div');
-  characterSelectionScreen.id = 'character-selection-screen';
-  characterSelectionScreen.style.position = 'fixed';
-  characterSelectionScreen.style.top = '0';
-  characterSelectionScreen.style.left = '0';
-  characterSelectionScreen.style.width = '100%';
-  characterSelectionScreen.style.height = '100%';
-  characterSelectionScreen.style.backgroundColor = '#333';
-  characterSelectionScreen.style.display = 'flex';
-  characterSelectionScreen.style.flexDirection = 'column';
-  characterSelectionScreen.style.justifyContent = 'center';
-  characterSelectionScreen.style.alignItems = 'center';
-  characterSelectionScreen.style.zIndex = '10000';
+(async function () {
+  registerServiceWorker();
   
-  // Create a header
-  const header = document.createElement('h1');
-  header.textContent = 'Select Your Character';
-  header.style.color = 'white';
-  header.style.fontFamily = 'sans-serif';
-  header.style.marginBottom = '40px';
+  // Define character selection function but don't call it yet
+  initializeCharacterSelection = async function() {
+    console.log('Initializing character selection');
+    // Character selection code...
+  };
+
+  // Clean up any existing UI elements
+  const elementsToClean = [
+    'controls-panel', 
+    'inventory-ui', 
+    'sign-out-button',
+    'character-selection-screen',  // Important: remove any existing character selection
+    'fishing-game-area'
+  ];
   
-  // Create container for characters
-  const charactersContainer = document.createElement('div');
-  charactersContainer.style.display = 'flex';
-  charactersContainer.style.justifyContent = 'space-around';
-  charactersContainer.style.width = '80%';
-  charactersContainer.style.maxWidth = '800px';
+  elementsToClean.forEach(id => {
+    const element = document.getElementById(id);
+    if (element) element.remove();
+  });
+
+  // Check if we need to show login screen
+  const isLoggedIn = await checkUserLoggedIn();
+  const isGuestMode = localStorage.getItem('bluejayquest_guest_mode') === 'true';
   
-  // Create character options with preview
-  for (const [key, value] of Object.entries(modelSets)) {
-    const characterOption = document.createElement('div');
-    characterOption.classList.add('character-option');
-    characterOption.style.display = 'flex';
-    characterOption.style.flexDirection = 'column';
-    characterOption.style.alignItems = 'center';
-    characterOption.style.cursor = 'pointer';
-    characterOption.style.padding = '20px';
-    characterOption.style.borderRadius = '10px';
-    characterOption.style.transition = 'background-color 0.3s';
+  if (!isLoggedIn && !isGuestMode) {
+    // Create and append login screen first
+    const loginScreen = createLoginScreen();
+    document.body.appendChild(loginScreen);
     
-    // Preview area (will be filled with THREE.js)
-    const previewArea = document.createElement('div');
-    previewArea.classList.add('preview-area');
-    previewArea.style.width = '300px';
-    previewArea.style.height = '300px';
-    previewArea.style.backgroundColor = '#222';
-    previewArea.style.borderRadius = '5px';
-    previewArea.style.marginBottom = '15px';
-    previewArea.dataset.character = key;
-    
-    // Character name
-    const characterName = document.createElement('h2');
-    characterName.textContent = key === 'original' ? 'Blue' : 'Pink';
-    characterName.style.color = 'white';
-    characterName.style.fontFamily = 'sans-serif';
-    
-    // Selection indicator
-    const selectionIndicator = document.createElement('div');
-    selectionIndicator.classList.add('selection-indicator');
-    selectionIndicator.textContent = 'Select';
-    selectionIndicator.style.backgroundColor = key === 'original' ? '#3498db' : '#e74c3c';
-    selectionIndicator.style.color = 'white';
-    selectionIndicator.style.padding = '8px 20px';
-    selectionIndicator.style.borderRadius = '5px';
-    selectionIndicator.style.marginTop = '10px';
-    selectionIndicator.style.fontFamily = 'sans-serif';
-    
-    characterOption.appendChild(previewArea);
-    characterOption.appendChild(characterName);
-    characterOption.appendChild(selectionIndicator);
-    
-    // Handle click to select character
-    characterOption.addEventListener('click', () => {
-      // Remove highlight from all options
-      document.querySelectorAll('.character-option').forEach(option => {
-        option.style.backgroundColor = 'transparent';
-      });
+    // Set up guest mode listener
+    document.addEventListener('guestModeActivated', async () => {
+      // Remove login screen before doing anything else
+      if (loginScreen && loginScreen.parentNode) {
+        loginScreen.parentNode.removeChild(loginScreen);
+      }
       
-      // Highlight selected option
-      characterOption.style.backgroundColor = 'rgba(255,255,255,0.1)';
+      // Then handle guest mode
+      await initializeLocalInventory();
       
-      // Set the selected character
-      selectedCharacter = key;
+      // Now it's safe to show character selection
+      await initializeCharacterSelection();
     });
     
-    charactersContainer.appendChild(characterOption);
-  }
-  
-  // Create start button
-  const startButton = document.createElement('button');
-  startButton.textContent = 'Start Game';
-  startButton.style.marginTop = '40px';
-  startButton.style.padding = '12px 30px';
-  startButton.style.borderRadius = '5px';
-  startButton.style.backgroundColor = '#4CAF50';
-  startButton.style.color = 'white';
-  startButton.style.border = 'none';
-  startButton.style.fontSize = '18px';
-  startButton.style.cursor = 'pointer';
-  startButton.style.fontFamily = 'sans-serif';
-  startButton.style.transition = 'background-color 0.3s';
-  
-  startButton.addEventListener('mouseover', () => {
-    startButton.style.backgroundColor = '#45a049';
-  });
-  
-  startButton.addEventListener('mouseout', () => {
-    startButton.style.backgroundColor = '#4CAF50';
-  });
-  
-  // Add components to selection screen
-  characterSelectionScreen.appendChild(header);
-  characterSelectionScreen.appendChild(charactersContainer);
-  characterSelectionScreen.appendChild(startButton);
-  
-  // Add selection screen to the document body
-  document.body.appendChild(characterSelectionScreen);
-  
-
-
-  // Initialize THREE.js for character previews
-  const previewRenderers = {};
-  const previewScenes = {};
-  const previewCameras = {};
-  
-  // Set up preview scenes for each character
-  function setupCharacterPreviews() {
-    document.querySelectorAll('.preview-area').forEach(previewArea => {
-      const character = previewArea.dataset.character;
-      
-      // Create scene
-      const scene = new THREE.Scene();
-      previewScenes[character] = scene;
-      
-      // Create camera
-      const camera = new THREE.PerspectiveCamera(
-        45, previewArea.clientWidth / previewArea.clientHeight, 0.1, 1000
-      );
-      camera.position.set(0, 2, 5);
-      previewCameras[character] = camera;
-      
-      // Create renderer
-      const renderer = new THREE.WebGLRenderer({ antialias: true });
-      renderer.setSize(previewArea.clientWidth, previewArea.clientHeight);
-      renderer.setClearColor(0x222222);
-      previewArea.appendChild(renderer.domElement);
-      previewRenderers[character] = renderer;
-      
-      // Add lights
-      const ambientLight = new THREE.AmbientLight(0xffffff, 0.8); // Increased from 0.5 to 0.8
-      scene.add(ambientLight);
-      
-      const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0); // Increased from 0.8 to 1.0
-      directionalLight.position.set(0, 10, 10);
-      scene.add(directionalLight);
-      
-      // Add a secondary light from another angle for better model illumination
-      const secondaryLight = new THREE.DirectionalLight(0xffffff, 0.6);
-      secondaryLight.position.set(5, 5, -10); // Light from opposite side
-      scene.add(secondaryLight);
-      
-      // Optional: Add a soft spotlight to highlight the model
-      const spotLight = new THREE.SpotLight(0xffffff, 0.7);
-      spotLight.position.set(0, 10, 2);
-      spotLight.angle = Math.PI / 4;
-      spotLight.penumbra = 0.6; // Soft edge
-      spotLight.distance = 20;
-      scene.add(spotLight);
-      
-      // Load character model for preview
-      const fbxLoader = createCachedFBXLoader();
-      const modelPath = modelSets[character].standing;
-      
-      const loadingIndicator = document.createElement('div');
-      loadingIndicator.textContent = 'Loading model...';
-      loadingIndicator.style.color = 'white';
-      loadingIndicator.style.position = 'absolute';
-      loadingIndicator.style.top = '50%';
-      loadingIndicator.style.left = '50%';
-      loadingIndicator.style.transform = 'translate(-50%, -50%)';
-      previewArea.appendChild(loadingIndicator);
-
-    fbxLoader.load(modelPath, 
-      (fbx) => {
-        // Remove loading indicator
-        previewArea.removeChild(loadingIndicator);
+    // Wait for authentication to change
+    await new Promise(resolve => {
+      const checkAuth = async () => {
+        const currentlyLoggedIn = await checkUserLoggedIn();
+        const currentlyGuestMode = localStorage.getItem('bluejayquest_guest_mode') === 'true';
         
-        // Scale and position model as before
-        fbx.scale.set(0.01, 0.015, 0.01);
-        fbx.rotation.y = Math.PI;
-        scene.add(fbx);
-        
-        // Setup animation if available as before
-        if (fbx.animations && fbx.animations.length > 0) {
-          const mixer = new THREE.AnimationMixer(fbx);
-          const action = mixer.clipAction(fbx.animations[0]);
-          action.play();
-          previewScenes[character].userData.mixer = mixer;
-        }
-      },
-      (xhr) => {
-        // Show loading progress
-        if (xhr.lengthComputable) {
-          const percent = (xhr.loaded / xhr.total * 100).toFixed(0);
-          loadingIndicator.textContent = `${percent}%`;
-        }
-      },
-      (error) => {
-        console.error(`Error loading model: ${error}`);
-        loadingIndicator.textContent = 'Error loading model';
-        loadingIndicator.style.color = 'red';
-      }
-    );
-  });
-}
-  
-  // Animation loop for previews
-  const previewClock = new THREE.Clock();
-  
-  function animatePreviews() {
-    // First check if the element exists before accessing its properties
-    const characterSelectionScreen = document.getElementById('character-selection-screen');
-    
-    if (!characterSelectionScreen) {
-      // Element doesn't exist yet, try again on next frame
-      requestAnimationFrame(animatePreviews);
-      return;
-    }
-    
-    if (characterSelectionScreen.style.display !== 'none') {
-      requestAnimationFrame(animatePreviews);
-      
-      const delta = previewClock.getDelta();
-      
-      // Update all preview scenes
-      for (const character in previewScenes) {
-        if (previewScenes[character].userData.mixer) {
-          previewScenes[character].userData.mixer.update(delta);
-        }
-        
-        // Rotate the model slightly for showcase
-        previewScenes[character].children.forEach(child => {
-          if (child.type === 'Group' || child.type === 'Object3D') {
-            child.rotation.y += 0.01;
+        if (currentlyLoggedIn) {
+          // User logged in properly, remove login screen
+          if (loginScreen && loginScreen.parentNode) {
+            loginScreen.parentNode.removeChild(loginScreen);
           }
-        });
-        
-        previewRenderers[character].render(previewScenes[character], previewCameras[character]);
-      }
+          await initializeInventoryDatabase();
+          resolve();
+        } 
+        else if (currentlyGuestMode) {
+          // Guest mode is handled by event listener
+          resolve();
+        }
+        else {
+          // Keep checking
+          setTimeout(checkAuth, 1000);
+        }
+      };
+      
+      checkAuth();
+    });
+    
+    // Only now proceed to character selection if needed 
+    // (and only if not already handled by guest mode event)
+    if (await checkUserLoggedIn()) {
+      await initializeCharacterSelection();
     }
   }
-
-  setupCharacterPreviews();
-  animatePreviews();
-  
-  // Handle start button click
-  startButton.addEventListener('click', () => {
-    if (!selectedCharacter) {
-      alert('Please select a character first!');
-      return;
+  else {
+    // Already logged in or in guest mode
+    if (isLoggedIn) {
+      await initializeInventoryDatabase();
+    } else {
+      await initializeLocalInventory();
     }
     
-    // Hide character selection screen
-    characterSelectionScreen.style.display = 'none';
-    
-    addSignOutButton()
+    // Now safe to show character selection
+    await initializeCharacterSelection();
+  }
+})();
 
-    // Start loading the game with selected character
-    initializeGame(selectedCharacter);
+// Add a variable to track the selected character model
+let selectedCharacter = '';
+const modelSets = {
+  'original': {
+    standing: '/assets/Standing.fbx',
+    walking: '/assets/Walking.fbx'
+  },
+  'b': {
+    standing: '/assets/StandingB.fbx',
+    walking: '/assets/WalkingB.fbx'
+  }
+};
+
+// Instead of having this function inside another function, move it to the top level
+function addSignOutButton() {
+  // Remove any existing button first
+  const existingBtn = document.getElementById('sign-out-button');
+  if (existingBtn) {
+    existingBtn.remove();
+  }
+  
+  const signOutBtn = document.createElement('button');
+  signOutBtn.id = 'sign-out-button';
+  signOutBtn.textContent = localStorage.getItem('bluejayquest_guest_mode') === 'true' 
+    ? 'Back to Login' 
+    : 'Sign Out';
+  
+  // Style the button
+  signOutBtn.style.position = 'fixed';
+  signOutBtn.style.bottom = '20px';
+  signOutBtn.style.right = '20px';
+  signOutBtn.style.zIndex = '10001';
+  signOutBtn.style.padding = '8px 12px';
+  signOutBtn.style.backgroundColor = '#e74c3c';
+  signOutBtn.style.color = 'white';
+  signOutBtn.style.border = 'none';
+  signOutBtn.style.borderRadius = '4px';
+  signOutBtn.style.cursor = 'pointer';
+  signOutBtn.style.boxShadow = '0 2px 5px rgba(0,0,0,0.2)';
+  
+  // Use onclick instead of addEventListener to avoid potential issues with multiple handlers
+  signOutBtn.onclick = async function() {
+    console.log('Sign out button clicked');
+    
+    // For logged-in users, call signOut first
+    if (localStorage.getItem('bluejayquest_guest_mode') !== 'true') {
+      try {
+        await signOut();
+      } catch (err) {
+        console.error('Error during signOut:', err);
+        // Continue with force logout even if signOut fails
+      }
+    }
+    
+    // Call our global force logout function
+    forceLogout();
+    
+    // Prevent default and stop propagation
+    return false;
+  };
+  
+  document.body.appendChild(signOutBtn);
+}
+
+// Create character selection screen
+const characterSelectionScreen = document.createElement('div');
+characterSelectionScreen.id = 'character-selection-screen';
+characterSelectionScreen.style.position = 'fixed';
+characterSelectionScreen.style.top = '0';
+characterSelectionScreen.style.left = '0';
+characterSelectionScreen.style.width = '100%';
+characterSelectionScreen.style.height = '100%';
+characterSelectionScreen.style.backgroundColor = '#333';
+characterSelectionScreen.style.display = 'flex';
+characterSelectionScreen.style.flexDirection = 'column';
+characterSelectionScreen.style.justifyContent = 'center';
+characterSelectionScreen.style.alignItems = 'center';
+characterSelectionScreen.style.zIndex = '10000';
+
+// Create a header
+const header = document.createElement('h1');
+header.textContent = 'Select Your Character';
+header.style.color = 'white';
+header.style.fontFamily = 'sans-serif';
+header.style.marginBottom = '40px';
+
+// Create container for characters
+const charactersContainer = document.createElement('div');
+charactersContainer.style.display = 'flex';
+charactersContainer.style.justifyContent = 'space-around';
+charactersContainer.style.width = '80%';
+charactersContainer.style.maxWidth = '800px';
+
+// Create character options with preview
+for (const [key, value] of Object.entries(modelSets)) {
+  const characterOption = document.createElement('div');
+  characterOption.classList.add('character-option');
+  characterOption.style.display = 'flex';
+  characterOption.style.flexDirection = 'column';
+  characterOption.style.alignItems = 'center';
+  characterOption.style.cursor = 'pointer';
+  characterOption.style.padding = '20px';
+  characterOption.style.borderRadius = '10px';
+  characterOption.style.transition = 'background-color 0.3s';
+  
+  // Preview area (will be filled with THREE.js)
+  const previewArea = document.createElement('div');
+  previewArea.classList.add('preview-area');
+  previewArea.style.width = '300px';
+  previewArea.style.height = '300px';
+  previewArea.style.backgroundColor = '#222';
+  previewArea.style.borderRadius = '5px';
+  previewArea.style.marginBottom = '15px';
+  previewArea.dataset.character = key;
+  
+  // Character name
+  const characterName = document.createElement('h2');
+  characterName.textContent = key === 'original' ? 'Blue' : 'Pink';
+  characterName.style.color = 'white';
+  characterName.style.fontFamily = 'sans-serif';
+  
+  // Selection indicator
+  const selectionIndicator = document.createElement('div');
+  selectionIndicator.classList.add('selection-indicator');
+  selectionIndicator.textContent = 'Select';
+  selectionIndicator.style.backgroundColor = key === 'original' ? '#3498db' : '#e74c3c';
+  selectionIndicator.style.color = 'white';
+  selectionIndicator.style.padding = '8px 20px';
+  selectionIndicator.style.borderRadius = '5px';
+  selectionIndicator.style.marginTop = '10px';
+  selectionIndicator.style.fontFamily = 'sans-serif';
+  
+  characterOption.appendChild(previewArea);
+  characterOption.appendChild(characterName);
+  characterOption.appendChild(selectionIndicator);
+  
+  // Handle click to select character
+  characterOption.addEventListener('click', () => {
+    // Remove highlight from all options
+    document.querySelectorAll('.character-option').forEach(option => {
+      option.style.backgroundColor = 'transparent';
+    });
+    
+    // Highlight selected option
+    characterOption.style.backgroundColor = 'rgba(255,255,255,0.1)';
+    
+    // Set the selected character
+    selectedCharacter = key;
   });
   
+  charactersContainer.appendChild(characterOption);
+}
+
+// Create start button
+const startButton = document.createElement('button');
+startButton.textContent = 'Start Game';
+startButton.style.marginTop = '40px';
+startButton.style.padding = '12px 30px';
+startButton.style.borderRadius = '5px';
+startButton.style.backgroundColor = '#4CAF50';
+startButton.style.color = 'white';
+startButton.style.border = 'none';
+startButton.style.fontSize = '18px';
+startButton.style.cursor = 'pointer';
+startButton.style.fontFamily = 'sans-serif';
+startButton.style.transition = 'background-color 0.3s';
+
+startButton.addEventListener('mouseover', () => {
+  startButton.style.backgroundColor = '#45a049';
+});
+
+startButton.addEventListener('mouseout', () => {
+  startButton.style.backgroundColor = '#4CAF50';
+});
+
+// Add components to selection screen
+characterSelectionScreen.appendChild(header);
+characterSelectionScreen.appendChild(charactersContainer);
+characterSelectionScreen.appendChild(startButton);
+
+// Add selection screen to the document body
+document.body.appendChild(characterSelectionScreen);
+
+
+
+// Initialize THREE.js for character previews
+const previewRenderers = {};
+const previewScenes = {};
+const previewCameras = {};
+
+// Set up preview scenes for each character
+function setupCharacterPreviews() {
+  document.querySelectorAll('.preview-area').forEach(previewArea => {
+    const character = previewArea.dataset.character;
+    
+    // Create scene
+    const scene = new THREE.Scene();
+    previewScenes[character] = scene;
+    
+    // Create camera
+    const camera = new THREE.PerspectiveCamera(
+      45, previewArea.clientWidth / previewArea.clientHeight, 0.1, 1000
+    );
+    camera.position.set(0, 2, 5);
+    previewCameras[character] = camera;
+    
+    // Create renderer
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(previewArea.clientWidth, previewArea.clientHeight);
+    renderer.setClearColor(0x222222);
+    previewArea.appendChild(renderer.domElement);
+    previewRenderers[character] = renderer;
+    
+    // Add lights
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.8); // Increased from 0.5 to 0.8
+    scene.add(ambientLight);
+    
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0); // Increased from 0.8 to 1.0
+    directionalLight.position.set(0, 10, 10);
+    scene.add(directionalLight);
+    
+    // Add a secondary light from another angle for better model illumination
+    const secondaryLight = new THREE.DirectionalLight(0xffffff, 0.6);
+    secondaryLight.position.set(5, 5, -10); // Light from opposite side
+    scene.add(secondaryLight);
+    
+    // Optional: Add a soft spotlight to highlight the model
+    const spotLight = new THREE.SpotLight(0xffffff, 0.7);
+    spotLight.position.set(0, 10, 2);
+    spotLight.angle = Math.PI / 4;
+    spotLight.penumbra = 0.6; // Soft edge
+    spotLight.distance = 20;
+    scene.add(spotLight);
+    
+    // Load character model for preview
+    const fbxLoader = createCachedFBXLoader();
+    const modelPath = modelSets[character].standing;
+    
+    const loadingIndicator = document.createElement('div');
+    loadingIndicator.textContent = 'Loading model...';
+    loadingIndicator.style.color = 'white';
+    loadingIndicator.style.position = 'absolute';
+    loadingIndicator.style.top = '50%';
+    loadingIndicator.style.left = '50%';
+    loadingIndicator.style.transform = 'translate(-50%, -50%)';
+    previewArea.appendChild(loadingIndicator);
+
+  fbxLoader.load(modelPath, 
+    (fbx) => {
+      // Remove loading indicator
+      previewArea.removeChild(loadingIndicator);
+      
+      // Scale and position model as before
+      fbx.scale.set(0.01, 0.015, 0.01);
+      fbx.rotation.y = Math.PI;
+      scene.add(fbx);
+      
+      // Setup animation if available as before
+      if (fbx.animations && fbx.animations.length > 0) {
+        const mixer = new THREE.AnimationMixer(fbx);
+        const action = mixer.clipAction(fbx.animations[0]);
+        action.play();
+        previewScenes[character].userData.mixer = mixer;
+      }
+    },
+    (xhr) => {
+      // Show loading progress
+      if (xhr.lengthComputable) {
+        const percent = (xhr.loaded / xhr.total * 100).toFixed(0);
+        loadingIndicator.textContent = `${percent}%`;
+      }
+    },
+    (error) => {
+      console.error(`Error loading model: ${error}`);
+      loadingIndicator.textContent = 'Error loading model';
+      loadingIndicator.style.color = 'red';
+    }
+  );
+});
+}
+
+// Animation loop for previews
+const previewClock = new THREE.Clock();
+
+function animatePreviews() {
+  // First check if the element exists before accessing its properties
+  const characterSelectionScreen = document.getElementById('character-selection-screen');
+  
+  if (!characterSelectionScreen) {
+    // Element doesn't exist yet, try again on next frame
+    requestAnimationFrame(animatePreviews);
+    return;
+  }
+  
+  if (characterSelectionScreen.style.display !== 'none') {
+    requestAnimationFrame(animatePreviews);
+    
+    const delta = previewClock.getDelta();
+    
+    // Update all preview scenes
+    for (const character in previewScenes) {
+      if (previewScenes[character].userData.mixer) {
+        previewScenes[character].userData.mixer.update(delta);
+      }
+      
+      // Rotate the model slightly for showcase
+      previewScenes[character].children.forEach(child => {
+        if (child.type === 'Group' || child.type === 'Object3D') {
+          child.rotation.y += 0.01;
+        }
+      });
+      
+      previewRenderers[character].render(previewScenes[character], previewCameras[character]);
+    }
+  }
+}
+
+setupCharacterPreviews();
+animatePreviews();
+
+// Handle start button click
+startButton.addEventListener('click', () => {
+  if (!selectedCharacter) {
+    alert('Please select a character first!');
+    return;
+  }
+  
+  // Hide character selection screen
+  characterSelectionScreen.style.display = 'none';
+  
+  addSignOutButton()
+
+  // Start loading the game with selected character
+  initializeGame(selectedCharacter);
+});
+
 // Create a controls info panel
 function createControlsPanel() {
+  // Check if panel already exists
+  if (document.getElementById('controls-panel')) {
+    console.log('Controls panel already exists, not creating a duplicate');
+    return;
+  }
+  
   const controlsPanel = document.createElement('div');
   controlsPanel.id = 'controls-panel';
   controlsPanel.style.position = 'fixed';
@@ -569,70 +663,70 @@ function createControlsPanel() {
   });
 }
 
-  // Move existing map initialization and other setup into a function
-  async function initializeGame(characterType) {
-    // Optionally disable telemetry to avoid POST errors
-    if (mapboxgl.setTelemetryEnabled) {
-      mapboxgl.setTelemetryEnabled(false);
-    }
-  
-    // Create loading screen for model loading
-    const loadingScreen = document.createElement('div');
-    loadingScreen.style.position = 'fixed';
-    loadingScreen.style.top = '0';
-    loadingScreen.style.left = '0';
-    loadingScreen.style.width = '100%';
-    loadingScreen.style.height = '100%';
-    loadingScreen.style.backgroundColor = '#333';
-    loadingScreen.style.display = 'flex';
-    loadingScreen.style.flexDirection = 'column'; 
-    loadingScreen.style.justifyContent = 'center';
-    loadingScreen.style.alignItems = 'center';
-    loadingScreen.style.zIndex = '9999';
-    loadingScreen.innerHTML = '<h1 style="color: white; font-family: sans-serif;">Loading 3D Models...</h1>';
+// Move existing map initialization and other setup into a function
+async function initializeGame(characterType) {
+  // Optionally disable telemetry to avoid POST errors
+  if (mapboxgl.setTelemetryEnabled) {
+    mapboxgl.setTelemetryEnabled(false);
+  }
 
-      // Create header and status elements
-    const loadingHeader = document.createElement('h1');
-    loadingHeader.style.color = 'white';
-    loadingHeader.style.fontFamily = 'sans-serif';
-    loadingHeader.textContent = 'Loading 3D Models...';
-    
-    // Add status text that will update
-    const loadingStatus = document.createElement('div');
-    loadingStatus.style.color = '#aaaaaa';
-    loadingStatus.style.fontFamily = 'sans-serif';
-    loadingStatus.style.marginTop = '15px';
-    loadingStatus.textContent = 'Checking cache...';
-    
-    // Add the elements to the loading screen
-    loadingScreen.appendChild(loadingHeader);
-  loadingScreen.appendChild(loadingStatus);
+  // Create loading screen for model loading
+  const loadingScreen = document.createElement('div');
+  loadingScreen.style.position = 'fixed';
+  loadingScreen.style.top = '0';
+  loadingScreen.style.left = '0';
+  loadingScreen.style.width = '100%';
+  loadingScreen.style.height = '100%';
+  loadingScreen.style.backgroundColor = '#333';
+  loadingScreen.style.display = 'flex';
+  loadingScreen.style.flexDirection = 'column'; 
+  loadingScreen.style.justifyContent = 'center';
+  loadingScreen.style.alignItems = 'center';
+  loadingScreen.style.zIndex = '9999';
+  loadingScreen.innerHTML = '<h1 style="color: white; font-family: sans-serif;">Loading 3D Models...</h1>';
 
-    document.body.appendChild(loadingScreen);
+    // Create header and status elements
+  const loadingHeader = document.createElement('h1');
+  loadingHeader.style.color = 'white';
+  loadingHeader.style.fontFamily = 'sans-serif';
+  loadingHeader.textContent = 'Loading 3D Models...';
   
-    // Keep track of loaded models
-    let modelsLoaded = 0;
-    const totalModelsToLoad = 2;
+  // Add status text that will update
+  const loadingStatus = document.createElement('div');
+  loadingStatus.style.color = '#aaaaaa';
+  loadingStatus.style.fontFamily = 'sans-serif';
+  loadingStatus.style.marginTop = '15px';
+  loadingStatus.textContent = 'Checking cache...';
   
-    // Add these variables at the top of your file
-    let birdContainer = null; // Container to handle proper pivoting
-    let previousPosition = new THREE.Vector3();
-    let collisionDetected = false;
-    const collisionCheckDistance = 1.0; // Distance to check ahead for collisions
-  
-    // Add pitch control variables
-    const pitchSettings = {
-      min: 0,
-      max: 85,
-      step: 5
-    };
+  // Add the elements to the loading screen
+  loadingScreen.appendChild(loadingHeader);
+loadingScreen.appendChild(loadingStatus);
 
-    const loadStatus = {
-      standing: { loaded: false, fromCache: false, startTime: performance.now() },
-      walking: { loaded: false, fromCache: false, startTime: performance.now() }
-    };
+  document.body.appendChild(loadingScreen);
 
-    const modelPaths = modelSets[characterType];
+  // Keep track of loaded models
+  let modelsLoaded = 0;
+  const totalModelsToLoad = 2;
+
+  // Add these variables at the top of your file
+  let birdContainer = null; // Container to handle proper pivoting
+  let previousPosition = new THREE.Vector3();
+  let collisionDetected = false;
+  const collisionCheckDistance = 1.0; // Distance to check ahead for collisions
+
+  // Add pitch control variables
+  const pitchSettings = {
+    min: 0,
+    max: 85,
+    step: 5
+  };
+
+  const loadStatus = {
+    standing: { loaded: false, fromCache: false, startTime: performance.now() },
+    walking: { loaded: false, fromCache: false, startTime: performance.now() }
+  };
+
+  const modelPaths = modelSets[characterType];
 // -----------------------------
 // Mapbox initialization
 // -----------------------------
@@ -1172,12 +1266,31 @@ window.addEventListener('keydown', (event) => {
       }
       break;
     case 'i':
-      case 'I':
-        // Open inventory on 'I' key press
+    case 'I':
+      // Check if inventory is already open
+      const existingInventory = document.getElementById('inventory-ui');
+      
+      if (existingInventory) {
+        // If inventory is already open, close it
+        existingInventory.parentNode.removeChild(existingInventory);
+        return;
+      }
+      
+      // Open inventory if it's not already open
+      const guestMode = localStorage.getItem('bluejayquest_guest_mode') === 'true';
+      
+      if (guestMode) {
+        // For guest users, use local storage inventory
+        import('./api/fishLocalInventoryUI.js').then(module => {
+          module.showLocalInventoryUI();
+        });
+      } else {
+        // For regular users, use database inventory
         import('./api/fishInventoryUI.js').then(module => {
           module.showInventoryUI();
         });
-        break;
+      }
+      break;
     case 'Escape':
       if (fishingGameState.isFishing) {
         // Pass birdContainer as additional parameter
@@ -1505,4 +1618,3 @@ map.on('styleimagemissing', (e) => {
 });
 
 }
-})();

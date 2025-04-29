@@ -11,14 +11,14 @@ export async function signInWithGoogle() {
     options: {
       redirectTo: window.location.origin
     }
-  })
+  });
   
   if (error) {
-    console.error('Error signing in with Google:', error.message)
-    return { success: false, error }
+    console.error('Error signing in with Google:', error);
+    return { success: false, error };
   }
   
-  return { success: true, data }
+  return { success: true, user: data.user };
 }
 
 // Get current user
