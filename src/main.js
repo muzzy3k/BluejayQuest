@@ -740,7 +740,8 @@ const map = new mapboxgl.Map({
   pitch: 75,
   bearing: 0,
   antialias: true,
-  renderWorldCopies: false 
+  renderWorldCopies: false, 
+  minZoom: 18
 });
 
 // Add map style controls (unchanged)
@@ -1474,7 +1475,7 @@ function setupTerrainAndBuildings() {
           type: 'raster-dem',
           url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
           tileSize: 512,
-          maxzoom: 14 // Lower maxzoom to avoid 404 errors
+          maxzoom: 14 
         });
         map.setTerrain({ source: 'mapbox-dem', exaggeration: 1.2 });
       } catch (terrainError) {
