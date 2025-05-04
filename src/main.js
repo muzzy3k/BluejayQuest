@@ -49,6 +49,9 @@ function forceLogout() {
 (async function () {
   registerServiceWorker();
   
+  // Create footer first so it's available on all screens
+  createFooter();
+  
   // Define character selection function but don't call it yet
   initializeCharacterSelection = async function() {
     console.log('Initializing character selection');
@@ -167,7 +170,7 @@ function addSignOutButton() {
   
   // Style the button
   signOutBtn.style.position = 'fixed';
-  signOutBtn.style.bottom = '20px';
+  signOutBtn.style.bottom = 'calc(2.5rem + 8px)'; // Adjust to position above footer (footer height + padding)
   signOutBtn.style.right = '20px';
   signOutBtn.style.zIndex = '10001';
   signOutBtn.style.padding = '8px 12px';
@@ -1618,4 +1621,60 @@ map.on('styleimagemissing', (e) => {
   }
 });
 
+} // Close initializeGame function
+
+// -----------------------------
+// Create Footer with Portfolio Link
+// -----------------------------
+function createFooter() {
+  // Check if footer already exists
+  if (document.getElementById('app-footer')) {
+    return;
+  }
+  
+  const footer = document.createElement('div');
+  footer.id = 'app-footer';
+  
+  // Style the footer
+  footer.style.position = 'fixed';
+  footer.style.bottom = '0';
+  footer.style.left = '0';
+  footer.style.width = '100%';
+  footer.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+  footer.style.color = 'white';
+  footer.style.textAlign = 'center';
+  footer.style.padding = '8px 0';
+  footer.style.zIndex = '25000'; // Increase z-index to be higher than login screen (20000)
+  footer.style.fontFamily = 'sans-serif';
+  footer.style.fontSize = '14px';
+  footer.style.backdropFilter = 'blur(5px)';
+  footer.style.borderTop = '1px solid rgba(255, 255, 255, 0.2)';
+  
+  // Create the content
+  const content = document.createElement('div');
+  content.innerHTML = `
+    <span>Developed by <a href="https://muzzy3k.github.io/" target="_blank" rel="noopener noreferrer">Muzahidul Islam</a></span>
+    <span style="margin: 0 10px;">|</span>
+    <span>BluejayQuest &copy; ${new Date().getFullYear()}</span>
+  `;
+  
+  // Style the links
+  content.querySelector('a').style.color = '#4CAF50';
+  content.querySelector('a').style.textDecoration = 'none';
+  content.querySelector('a').style.fontWeight = 'bold';
+  content.querySelector('a').style.transition = 'color 0.3s ease';
+  
+  // Add hover effect for links
+  content.querySelector('a').addEventListener('mouseover', (e) => {
+    e.target.style.color = '#81C784';
+    e.target.style.textDecoration = 'underline';
+  });
+  
+  content.querySelector('a').addEventListener('mouseout', (e) => {
+    e.target.style.color = '#4CAF50';
+    e.target.style.textDecoration = 'none';
+  });
+  
+  footer.appendChild(content);
+  document.body.appendChild(footer);
 }
